@@ -1,0 +1,1937 @@
+---
+title: "Co-circ data cleaning"
+author: "Kelsey Shaw"
+date: "2023-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "~/Desktop/Notre Dame/2023 Lit review- Co-circulation pathogens/Data")
+```
+
+```{r load packages}
+library(tidyverse) #for everything
+library(stringdist) #to match word strings for data cleaning
+library(hunspell) #to look for misspellings
+library(viridis)
+library(stringr)
+library(ggpubr) #to arange graphs
+library("fuzzyjoin")
+library("gplots")
+library("reshape2")
+library("tidytext")
+```
+
+```{r check for duplicate paper assignments}
+people = read.csv("Paper assignments csv.csv")
+head(people)
+people = people%>%
+  select(X294, X281, X222, X348)%>%
+  na.omit()
+
+any(duplicated(unlist(people)))
+duplicated_values <- unlist(people)[duplicated(unlist(people))]
+print(duplicated_values)
+```
+
+```{r load data and delete extraneous}
+survey_raw = read.csv("Consensus data March 8 2024_doi edit.csv")
+
+head(survey_raw)
+nrow(survey_raw)
+
+
+###deal with any misspellings of "consensus" so that we find all of the completed surveys
+
+#first have to convert to all readable characters and lowercase, makes cross-ID easier
+survey_raw$Q1 <- iconv(survey_raw$Q1, to = "UTF-8", sub = "byte")
+survey_raw$Q1 = tolower(survey_raw$Q1)
+
+author_list = c("Consensus", "Alan", "Kelsey", "Neda", "Carol", "Saikanth", "Jenni", "Carly", "Guido", "Marya", "Sean", "Stacy", "Manar", "x", "write your name")
+
+k=stringsimmatrix(survey_raw$Q1, author_list, method="jw")
+
+dim(k)
+##we are applying the which.max function across the rows of the matrix
+#by using MARGIN=1 to find the best match of the corrected name
+#we then apply this which.max function for each row 
+#and created a new column with the corrected name
+survey_raw[,"Author"]=author_list[apply(X=k, MARGIN=1, FUN=which.max)]
+
+subs=survey_raw%>%
+  select(Q1, Author)
+subs #visual check; some mistakes but none with "Consensus" so I'm ok with it
+
+##first 18 columns have a lot of data on the submission's IP address, time duration, etc. will cut out for now for simplicity sake
+survey = survey_raw%>%
+  select(-1:-18)%>% #note the first row is the text of each question; will disappear when you only select included papers but would need to deal with it to analyze those not included
+  filter(Author =="Consensus")%>%
+  filter(Q12 == "Yes (write any notes below)")%>% 
+  mutate(Q3 = gsub("2016`", "2016", Q3)) #fixing a typo in year
+
+head(survey)
+nrow(survey)
+
+###
+##ok now try to deal with the zillion spellings of pathogens and diseases
+#PATHOGENS
+#Q14, Q18,Q21a, Q21e, Q162, Q166
+selected_columns = c("Q14", "Q18", "Q21a", "Q21e", "Q162", "Q166", "Q170", "Q174", "Q178")
+survey = survey%>%
+  #select(Q4,Q14, Q18, Q21a, Q21e, Q162, Q166)%>%
+#visual check to see if there are any unusual entries that I need to check make inclusion criteria; any suspicious ones saved in file "Pathogen manual check". Will need to be re-done #manually each time we get more data
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("tuber|Tuberculosis|TB", .), "Mycobacterium tuberculosis", 
+                                                 ifelse(grepl("immuno|HIV|Human Immunodeficiency Virus|ImmunoDeficiency|cy virus (HIV)|hiv|AIDS|Immunodeficency|Immunodeficiency", .), "HIV", 
+                                                ifelse(grepl("asmod|alaria|P. falcip", .), "Plasmodium spp",
+                                                ifelse(grepl("papil|hpv", .), "HPV",
+                                                ifelse(grepl("easl", .), "Measles",
+                                                ifelse(grepl("ov2|COVID|SARSCoV- 2|ARS-CO|Sars-CoV-2|SARS-CoV-2|SARS-CoV-2|Sars-Cov-2", .), "Sars-Cov-2",
+                                                ifelse(grepl("holer", .), "Vibrio Cholerae",
+                                                ifelse(grepl("eponema pallidu|phyl|syphilis|Syphilis", .), "Treponema pallidum",
+                                                       ##trep pallidum is syphillis
+                                                ifelse(grepl("ulcers", .), "Mycobacterium ulcerans",
+                                                ifelse(grepl("ika|ZIKV", .), "Zika Virus",
+                                                ifelse(grepl("DENV|eng", .), "Dengue Virus",
+                                                ifelse(grepl("titisB|titis B|HBV|titis b", .), "Hepatitis B Virus",
+                                                ifelse(grepl("titisD|titis D|HDV|delta", .), "Hepatitis D Virus",
+                                                ifelse(grepl("titisC|titis C|HCV|titis c", .), "Hepatitis C Virus",
+                                                ifelse(grepl("chisto|mansoni|SCHISTO", .), "Schistosoma spp",
+                                                ifelse(grepl("RSV|synci|syncytial virus|Sync", .), "RSV",
+                                                ifelse(grepl("uenza, Neis|meningitis causing|eningitis", .), "Meningitis (unspecified)", #from this paper
+                                                ifelse(grepl("flu", .), "Influenza",
+                                                ifelse(grepl("erpes|HSV-2", .), "HSV-2",
+                                                ifelse(grepl("kungu|CHIKV", .), "Chikungunya Virus",
+                                                ifelse(grepl("eish", .), "Leishmania spp",
+                                                ifelse(grepl("Pneumonia|pneumonia causing", .), "Leishmania spp",
+                                                ifelse(grepl("Wuchereria|LYMPH|lymph|ilarial", .), "Lymphatic Filariasis (unspecified)",
+                                                ifelse(grepl("gon|Gonorrhoea|Gonorrhea", .), "Neisseria gonorrhoeae",
+                                                ifelse(grepl("protozo", .), "Trypanosoma brucei",
+                                                ifelse(grepl("Hepatitus E Virus", .), "Hepatitis E Virus",    
+                                                ifelse(grepl("Typhi|phoid", .), "Salmonella typhi", 
+                                                ifelse(grepl("Unknown", .), "Kawasaki Disease (unknown etiology)", 
+                                                ifelse(grepl("hlamydia", .), "Chlamydia trachomatis", 
+                                                ifelse(grepl("hicken", .), "Varicella zoster virus", 
+                                                ifelse(grepl("hoopin|petus|pertussis", .), "Bordetella pertussis",
+                                                ifelse(grepl("parapertussis", .), "Bordetella parapertussis",
+                                                ifelse(grepl("ubell", .), "Rubella virus", 
+                                                ifelse(grepl("treptococcus pneumon", .), "	Streptococcus pneumoniae",
+                                                ifelse(grepl("ellow", .), "Yellow Fever Virus", 
+                                                ifelse(grepl("chancroid|emophilus ducreyi|Chancroid", .), "Haemophilus ducreyi", 
+                                                        .))))))))))))))))))))))))))))))))))))))%>%
+  rename(Q4 = Q4, Path1 = Q14, Path2 = Q18, Path3 = Q21a, Path4 = Q21e, Path5 = Q162, Path6 = Q166, Path7 = Q170, Path8 = Q174, Path9 =Q178)
+
+##this currently collapses all Plasmodium, all Schisto, all Leishmania
+##has a couple unspecified pneumonia and meningitis
+##also realized that sometimes people only put sexually transmitted for HIV. must correct:
+survey <- within(survey, {
+  if (any(grepl("HIV", Path1)) | any(grepl("HIV", Path2))) {
+    Q16 <- ifelse(grepl("HIV", Path1) & Q16 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q16)
+    Q20 <- ifelse(grepl("HIV", Path2) & Q20 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q20)
+  }
+})
+
+#get all this raw data with corrected pathogens into a file
+write.csv(survey, "Raw data with corrected patogens.csv", row.names=TRUE)
+
+##take a look at the compressed list of pathogens as a visual check for missed problems will need to repeat manually each time
+path_unique = survey %>%
+  select(-Q4)%>%
+  select(Path1, Path2, Path3, Path4, Path5, Path6, Path7, Path8, Path9)%>%
+  gather(key = "key", value = "word") %>%
+  select(word)%>%
+  count(word, sort = TRUE)
+
+path_unique
+write.csv(path_unique, "Pathogen key.csv", row.names = TRUE)
+#as of Jan 25th, 57 unique pathogens
+##went to excel and manually added in taxonomy to create a key to add that info to all rows
+
+##ok add taxonomy to dataset
+#Updated Jan 25th
+taxonomy = read.csv("Taxonomy Pathogen key.csv")
+
+##Ok, merge this info back with the rest of the data
+#survey = left_join(pathogen_clean, survey, by="Q4") #make sure this is joining the data correctly, row 12 and 13 look sketchy
+
+#HUMAN DZ
+
+```
+
+
+Out of this group from Feb 20th of 554 consensus surveys, 311 meet inclusion criteria
+
+```{r why were studies excluded?}
+survey_nos = survey_raw%>%
+  select(-1:-18)%>% #note the first row is the text of each question; will disappear when you only select included papers but would need to deal with it to analyze those not included
+  filter(Author =="Consensus")%>%
+  filter(Q12 == "No (write any notes below)")%>%
+  mutate(Q3 = gsub("2016`", "2016", Q3)) #fixing a typo in year
+
+columns_to_calculate <- c('Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11')
+percent_nos=survey %>%
+  rowwise() %>%
+  mutate(No_Count = sum(c_across(all_of(columns_to_calculate)) == 'No')) %>%
+  filter(No_Count > 0)%>%
+  select(Q4, No_Count)
+
+#above gives how many excluded due to multiple reasons
+#calculates the percent "no" each inclusion question got...doesn't account for fact that many papers were excluded for more than one reason
+###percentage of nos
+columns_to_calculate <- c("Q6", "Q7", "Q8", "Q9", "Q10", "Q11")
+percentage_no_df <- survey_nos %>%
+  summarise(across(all_of(columns_to_calculate),
+                   list(
+                     no_count = ~sum(. == "No", na.rm = TRUE),
+                     percentage_no = ~sum(. == "No", na.rm = TRUE) / (554-311) * 100
+                   )))%>%
+  pivot_longer(cols = everything(),
+               names_to = "Question",
+               values_to = "Value")%>%
+  separate(Question, into = c("Question", "Metric"), sep = "_") %>%
+  pivot_wider(names_from = Metric, values_from = Value)%>%
+  arrange(desc(percentage))
+```
+
+Data viz currently contains:
+1. Number of pathogens by year
+2. Which pathogens are modeled together
+3. Which pathogens each year (unpaired)
+4. Transmission mode by year
+```{r basic data viz}
+#for the raw survey that contains no's, need to fix one misentry and get rid of two nonsense rows with no data
+row_to_switch <- 384
+
+# Swap the values in rows Q3 and Q4
+survey_raw <- survey_raw %>%
+  mutate(Q3 = ifelse(row_number() == row_to_switch, Q4, Q3),
+         Q4 = ifelse(row_number() == row_to_switch, Q3, Q4))
+
+#overall number of papers by year
+data_prep_yr <- survey_raw %>%
+  mutate(Q3 = gsub("2016`", "2016", Q3)) %>%
+  group_by(Q3, Q12) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  filter(grepl("^\\d+$", Q3)) #gets rid of extraneous rows that just have the questions typed out, no data
+
+papers_by_year <- ggplot(data_prep_yr, aes(x = Q3, y = count, fill = Q12)) +
+  geom_bar(stat = "identity") +
+  labs(title = " ",
+       x = "Year",
+       y = "Count") +
+  theme_classic(base_size=16) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("firebrick", "navy"),
+                    labels = c("Not included", "Included"),
+                    name = NULL)   # Remove title of color key
+
+#####
+#number of pathogens
+#make percentages of models that have each no of pathogens
+no_paths <- survey %>%
+  group_by(Q13) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / sum(count) * 100)
+
+#pie chart. stacked bar looks better
+#no_paths_plot <- ggplot(no_paths, aes(x = "", y = percentage, fill = Q13)) +
+ # geom_bar(stat = "identity") +
+  #coord_polar(theta = "y") +
+  #labs(title = "Number of Pathogens Modeled") +
+  #theme_void() +
+ # theme(plot.caption = element_text(size = 14)) +
+  #geom_text(aes(x = 1.6, label = scales::percent(percentage, scale = 1, accuracy = 0.01), angle = 30),
+      #      position = position_stack(vjust = .8)) +
+  #labs(fill = " ")+
+  #scale_fill_viridis_d()
+
+#stacked bar chart of number of pathogens
+#custom_colors <- c("#E4960E","#EBA92A","#71989B","#235d72","#1C3948", "#153438" )
+#custom_colors <- c( "#FBFDE1","#F9E07F","#F9AD6A","#D46C4E","grey","#43978D","#3a7c89")
+custom_colors <- c( "navy", "#084594","#2171b5","#4292c6","#6baed6", "#c6dbef","grey")
+
+
+# Create the stacked bar chart
+#no_paths$Q13 <- reorder(no_paths$Q13, no_paths$percentage)
+
+#no_paths$Q13 <- factor(no_paths$Q13, levels = rev(unique(no_paths$Q13)))
+
+stacked_no_paths <- ggplot(no_paths, aes(x = "", y = percentage, fill = Q13)) +
+  geom_bar(stat = "identity", width = 1) +
+  scale_fill_manual(values = custom_colors) +
+  labs(x = NULL, y = NULL, fill = "Number of pathogens", title = "A.") +
+  theme_classic(base_size = 16) +
+  theme(legend.position = "bottom", 
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.line.x = element_blank()) +
+  coord_flip()
+
+
+##histogram of number of pathogens modeled together
+#i like the way the stacked bar looks better
+#no_paths_histo = ggplot(no_paths, aes(x=Q13, y = count, fill = factor(Q13, levels = unique(Q13)))) +
+ # geom_bar(stat = "identity", width = 1) +
+  #scale_fill_manual(values = custom_colors) +
+  #labs(x = NULL, y = NULL, fill = "Number of pathogens") +
+  #theme_classic(base_size = 25) 
+
+#pie chart of transmission modes
+#Q16, Q20, Q21c,Q21g,Q164,Q168
+#for now will ignore the text boxes that describe "Other"
+survey$Q20[28] = "Water-borne" #someone put way too many things for row 30 for leptospirosis; manually corrected; need to change each time as row number changes
+
+##also realized that sometimes people only put sexually transmitted for HIV. must correct:
+survey <- within(survey, {
+  if (any(grepl("HIV", Path1)) | any(grepl("HIV", Path2))) {
+    Q16 <- ifelse(grepl("HIV", Path1) & Q16 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q16)
+    Q20 <- ifelse(grepl("HIV", Path2) & Q20 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q20)
+  }
+})
+
+data_prep_mode <- survey %>%
+  separate(Q16, c("Mode1a", "Mode1b", "Mode1c"),sep=",", remove=F, convert =T)%>%
+  separate(Q20, c("Mode2a", "Mode2b", "Mode2c"),sep=",", remove=F,convert =T)%>%
+  separate(Q21c, c("Mode3a", "Mode3b", "Mode3c"),sep=",", remove=F,convert =T)%>%
+  separate(Q21g, c("Mode4a", "Mode4b", "Mode4c"),sep=",", remove=F,convert =T)%>%
+  separate(Q164, c("Mode5a", "Mode5b", "Mode5c"),sep=",", remove=F,convert =T)%>%
+  separate(Q168, c("Mode6a", "Mode6b", "Mode6c"),sep=",", remove=F,convert =T)%>%
+  separate(Q172, c("Mode7a", "Mode7b", "Mode7c"),sep=",", remove=F,convert =T)%>%
+  separate(Q176, c("Mode8a", "Mode8b", "Mode8c"),sep=",", remove=F,convert =T)%>%
+  separate(Q180, c("Mode9a", "Mode9b", "Mode9c"),sep=",", remove=F,convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+data_prep_mode <- data_prep_mode %>%
+  pivot_longer(cols = starts_with("Mode"), names_to = "Mode_Column", values_to = "Count")
+
+# Group by year (Q3) and calculate the combined counts
+data_prep_mode$Q3 <- as.numeric(data_prep_mode$Q3)
+mode_unique = data_prep_mode %>%
+  select(Count) %>%
+  group_by(word = Count) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / sum(Count) * 100)%>%
+  arrange(desc(percentage))
+
+mode_other = data_prep_mode%>%
+  filter(Count== "Other (please specify)")%>%
+  select(Q16_11_TEXT, Q20_11_TEXT, Q21c_11_TEXT)%>%
+  mutate(blood_count = rowSums(across(everything(), ~str_count(., "blood"))))
+
+
+percent_blood = sum(mode_other$blood_count)/nrow(mode_other)
+
+###horizontal stacked bar
+#d2fbd4,#a5dbc2,#7bbcb0,#559c9e,#3a7c89,#235d72,#123f5a
+#custom_colors <- c("#153438","#1C3948", "#235d72","#3a7c89","#71989B", "#EBA92A", "#E4960E")
+#custom_colors <- c("#E4960E","#EBA92A","#71989B", "#3a7c89","#235d72","#1C3948", "#153438" )
+custom_colors <- c("#D46C4E","#F9AD6A","#F9E07F","#FBFDE1", "#43978D","#3a7c89","#264D59")
+
+# Create the stacked bar chart
+mode_unique$word <- reorder(mode_unique$word, mode_unique$percentage)
+stacked_mode <- ggplot(mode_unique, aes(x = "", y = percentage, fill = factor(word))) +
+  geom_bar(stat = "identity", width = 1) +
+  scale_fill_manual(values = custom_colors) +  # Set custom colors
+  labs(x = NULL, y = NULL, title = "B.", fill = "Transmission Mode") +  # Remove axis labels
+  theme_classic(base_size=16) +
+  theme(#legend.position = "none",  # Remove legend
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank(),
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.line.x = element_blank(),
+        legend.position = "bottom") +  # Remove y-axis elements
+  coord_flip() # Flip the chart horizontally
+
+##now trends of transmission mode by year
+mode_counts <- data_prep_mode %>%
+  filter(!is.na(Count) & Count != "") %>%  # Filter out NA and empty values
+  group_by(Q3, Count) %>%
+  summarize(count = n()) %>%
+  ungroup()
+
+# Calculate percentage for each transmission mode within each year
+mode_counts <- mode_counts %>%
+  group_by(Q3) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Plot the stacked bar chart
+#custom_colors <- c("#D46C4E","#F9AD6A","#F9E07F","#FBFDE1", "#43978D","#3a7c89","#264D59")
+custom_colors <- c("#F9AD6A","#3a7c89","#43978D","#264D59","#D46C4E","#FBFDE1","#F9E07F")
+
+trans_yr = ggplot(mode_counts, aes(x = as.factor(Q3), y = percentage, fill = Count)) +
+  geom_bar(stat = "identity") +
+  labs(title = "C.",
+       x = "Year",
+       y = "Percentage") +
+  scale_fill_manual(values = custom_colors) +  # Set custom colors
+  theme_classic(base_size = 16) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0))  # Tilt x-axis labels
+
+figure_2 = ggarrange(stacked_no_paths, stacked_mode, trans_yr, nrow = 3)
+
+#pie chart, uglier
+#no_mode_plot = ggplot(mode_unique, aes(x = "", y = percentage, fill = word)) +
+  #geom_bar(stat = "identity") +
+  #coord_polar(theta = "y") +
+  #labs(title = "Transmission Modes Modeled") +
+  #theme_void() +
+  #theme(plot.caption = element_text(size = 14)) +
+  #geom_text(aes(x = 1.6, label = scales::percent(percentage, scale = 1, accuracy = 0.01), angle = 30),
+  #          position = position_stack(vjust = .8)) +
+  #labs(fill = " ")+
+  #scale_fill_viridis_d()
+##look at "other"
+#other = subset(data_prep_mode, Count == "Other (please specify)")
+
+#look at number pathogen by year
+#Q3 is what year, Q13 is how many pathogens
+#first just look at percent
+
+#number of pathogens by year
+data_prep_no <- survey %>%
+  group_by(Q3, Q13) %>%
+  summarise(count = n()) %>%
+  ungroup()
+
+number_by_year <- ggplot(data_prep_no, aes(x = Q3, y = count, fill = Q13)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Number of Pathogens (Q13) by year",
+       x = "Year (Q3)",
+       y = "Count",
+       fill = "Q13") +
+  theme_classic() +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_viridis_d()
+
+#eh kinda not interesting, mostly just see big increase in number of co-circ papers starting in 2020
+
+
+###
+##now look at which pathogens modeled together
+survey_which <- survey %>%
+  rowwise() %>%
+  mutate(
+    Combined = paste(na.omit(c(Path1, Path2, Path3, Path4, Path5, Path6)), collapse = " ")
+  ) %>%
+  select(Q3, Combined)
+
+
+survey_which <- survey %>%
+  rowwise() %>%
+  mutate(Combined = paste(na.omit(c(Path1, Path2, Path3, Path4, Path5, Path6)), collapse = " "))%>%
+  select(Q3, Combined)
+
+# Count the occurrences of each unique combination across rows
+combination_counts <- survey_which %>%
+  group_by(Combined) %>%
+  summarize(Count = n()) %>%
+  ungroup() %>%
+  filter(Count >= 2)%>% # Keep combinations that occur at least twice
+  arrange(desc(Count))
+print(combination_counts)
+
+combos_plot = ggplot(combination_counts, aes(x = reorder(Combined, -Count), y = Count)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Combinations", y = "Count") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))
+#again not that visually interesting (currently), but HIV-TB def blowing others out of the park currently, and HIV itself the main winner
+#will see after all the surveys are done, but I'm surprised there's not more resp stuff together
+
+#heatmap
+co_occurrence_matrix <- survey %>%
+  group_by(row_number()) %>%
+  mutate(co_occurrences = list(combn(c(Path1, Path2, Path3, Path4, Path5, Path6), 2, simplify = FALSE))) %>%
+  unnest(co_occurrences) %>%
+  count(co_occurrences) %>%
+  spread(co_occurrences, n, fill = 0)
+
+
+heatmap(co_occurrence_matrix, col = viridis::viridis(10))
+colnames(survey)
+
+###
+##count of which pathogens modeled by year
+data_prep_path_year <- survey %>%
+  pivot_longer(cols = starts_with("Path"), names_to = "Path_Column", values_to = "Pathogens")
+
+data_prep_path_year$Q3 <- as.numeric(data_prep_path_year$Q3)
+data_prep_path_year = data_prep_path_year %>%
+  select(Q3, Pathogens) %>%
+  group_by(Q3, word = Pathogens) %>%
+  summarize(Pathogens = n()) %>%
+  arrange(Q3, desc(Pathogens)) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  arrange(Q3)%>%
+  filter(Pathogens > 1) #impossible to look at with all of then, made it 2 or more occurences 
+
+# plot
+pathogen_year_plot=ggplot(data_prep_path_year, aes(x = Q3, y = Pathogens, fill = word)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Year (Q3)", y = "Count") +
+  scale_fill_viridis_d(name = "Pathogen") +  # Use the viridis color scale
+    scale_x_continuous(
+    breaks = seq(1997, 2023, by = 1),  # Specify breaks from 1997 to 2023
+    labels = seq(1997, 2023, by = 1))+   # Specify labels for the breaks
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Tilt x-axis labels
+
+
+
+###
+#transmission mode by year
+#Q16, Q20, Q21c,Q21g,Q164,Q168
+#for now will ignore the text boxes that describe "Other"
+survey$Q20[28] = "Water-borne" #someone put way too many things for row 30 for leptospirosis; manually corrected; need to change each time as row number changes
+
+data_prep_mode <- survey %>%
+  separate(Q16, c("Mode1a", "Mode1b", "Mode1c"),sep=",", remove=F, convert =T)%>%
+  separate(Q20, c("Mode2a", "Mode2b", "Mode2c"),sep=",", remove=F,convert =T)%>%
+  separate(Q21c, c("Mode3a", "Mode3b", "Mode3c"),sep=",", remove=F,convert =T)%>%
+  separate(Q21g, c("Mode4a", "Mode4b", "Mode4c"),sep=",", remove=F,convert =T)%>%
+  separate(Q164, c("Mode5a", "Mode5b", "Mode5c"),sep=",", remove=F,convert =T)%>%
+  separate(Q168, c("Mode6a", "Mode6b", "Mode6c"),sep=",", remove=F,convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+data_prep_mode <- data_prep_mode %>%
+  pivot_longer(cols = starts_with("Mode"), names_to = "Mode_Column", values_to = "Count")
+
+# Group by year (Q3) and calculate the combined counts
+data_prep_mode$Q3 <- as.numeric(data_prep_mode$Q3)
+mode_unique = data_prep_mode %>%
+  select(Q3, Count) %>%
+  group_by(Q3, word = Count) %>%
+  summarize(Count = n()) %>%
+  arrange(Q3, desc(Count)) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  arrange(Q3)
+
+# plot
+mode_year_plot=ggplot(mode_unique, aes(x = Q3, y = Count, fill = word)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Year (Q3)", y = "Count") +
+  scale_fill_viridis_d(name = "Transmission Mode") +  # Use the viridis color scale
+    scale_x_continuous(
+    breaks = seq(1991, 2023, by = 1),  # Specify breaks from 1997 to 2023
+    labels = seq(1991, 2023, by = 1))+   # Specify labels for the breaks
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Tilt x-axis labels
+```
+
+````{r authors motivations: q39, q46, q45}
+#q45, scholarly purpose/motivation:
+percent_purpose <- survey %>%
+  separate_rows(Q45, sep = ",") %>%
+  group_by(Q45) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / 311 * 100)%>%
+  filter(row_number() > 2)%>%  # Remove the top 2 rows because the common separator wasn't perfect for one of the long answers
+  arrange(desc(Percentage))
+
+#q39 author motivations, survey of 4 categories
+motivations = read.csv("Q39 responses_v2.csv")
+#colnames(motivations)
+motivations = motivations%>%
+  select(-Timestamp, -Does.this.answer.need.to.be.re.done.)%>%
+  rename(Category = Which.of.these.categories.does.Q39.fall.into...check.all.that.apply.or.write.in.other.)
+
+percent_motivation <- motivations %>%
+  separate_rows(Category, sep = "; ") %>%
+  mutate_all(~ ifelse(. == "", NA, .))%>%
+  na.omit()%>%
+  group_by(Category) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / 311 * 100)%>%
+  arrange(desc(Percentage))
+
+#google form didn't show the "other", just the typed in answer. fix that
+cat_strings = c("How does one pathogen impact another's dynamics", "Effect of intervention in one pathogen on all pathogens in the model", "Cost-effectiveness of different intervention strategies/optimal control", "Developing mathematical models for specific pairs of pathogens")
+
+percent_motivation <- motivations %>%
+  separate_rows(Category, sep = "; ") %>%
+  mutate_all(~ ifelse(. == "", NA, .))%>%
+  na.omit()%>%
+  mutate(
+    original_value = Category,  # Create a new column to store the original value
+    Category = case_when(Category %in% cat_strings ~ Category,  # Keep the original value if it's in the specific list
+       TRUE ~ "Other"  # Otherwise, replace with "Other"
+       ))%>%
+  group_by(Category) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / 311 * 100)%>%
+  arrange(desc(Percentage))
+````
+
+```{r sup fig2 - overlapping motivation categories}
+motivation_count <- motivations %>%
+  rowid_to_column()%>%
+  separate_rows(Category, sep = "; ") %>%
+  mutate_all(~ ifelse(. == "", NA, .))%>%
+  na.omit()%>%
+  mutate(
+    original_value = Category,  # Create a new column to store the original value
+    Category = case_when(Category %in% cat_strings ~ Category,  # Keep the original value if it's in the specific list
+       TRUE ~ "Other"  # Otherwise, replace with "Other"
+       ))%>%
+  mutate(Category = case_when(
+  Category == "How does one pathogen impact another's dynamics" ~ "Impact dynamics (i)",
+     Category ==  "Effect of intervention in one pathogen on all pathogens in the model" ~ "Effect of intervention (iii)",
+    Category == "Cost-effectiveness of different intervention strategies/optimal control" ~ "Cost-effectiveness/optimal control (iv)",
+  Category == "Developing mathematical models for specific pairs of pathogens" ~ "Developing mathematical models (ii)",
+    TRUE ~ Category))%>%
+  group_by(rowid)%>%
+  filter(n() > 1)%>%
+  mutate(pair = list(combn(sort(Category), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+heatmap_mots <- motivation_count[rep(seq_len(nrow(motivation_count)), motivation_count$count), ]
+
+heatmap_mots <- heatmap_mots %>%
+  mutate(pair = pmap_chr(list(Var1, Var2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")
+
+swapped_mots <- heatmap_mots[, c("Var1", "Var2", names(heatmap_mots)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(swapped_mots)[1:2] <- c("Var1", "Var2")
+
+mots_combined <- rbind(heatmap_mots, swapped_mots)
+
+mots_heatmap = ggplot(mots_combined, aes(x = Var1, y = Var2, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(x = " ", y = " ", fill = "Frequency") +
+  ggtitle(" ") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r model characteristics}
+#q22 what type of model
+percent_modeltype <- survey %>%
+  group_by(Q22) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#very messy, lots of multiple answers checked. will investigate and clean
+modeltype_check = survey%>%
+  mutate(across(Q22, ~ifelse(grepl("Deterministic,1", .), "Deterministic",
+                                                      ifelse(grepl("1", .), "Deterministic", .))))%>%
+  mutate(Q22 = ifelse(Q22 == "Individual-based,Stochastic", "Individual-based", Q22))%>%
+  select(Q4, Q5, Q22)%>%
+  filter(!(Q22 %in% c("Deterministic", "Stochastic", "Individual-based"))) #just so it's easier to see the weird ones
+
+percent_modeltype_clean <- modeltype_check %>%
+  group_by(Q22) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+model_type_clean=  percent_modeltype_clean%>%
+  separate(Q22, into = c("Cat1", "Cat2", "Cat3", "Cat4", "Cat5"), sep = ",", remove = FALSE, convert = TRUE)%>%
+  select(-Q22)%>%
+  pivot_longer(cols = starts_with("Cat"), names_to = "Cat_Column", values_to = "Count") %>%
+  na.omit()%>%
+  group_by(Count)
+
+#%>%
+  summarise(count = sum(count)) %>%
+  ungroup()%>%
+  mutate(percentage = count / 311 * 100)%>%
+  arrange(desc(percentage))
+
+#within host model?
+percent_withinhost <- survey %>%
+  group_by(Q23a) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#lookat what these are
+within_host=subset(survey, Q23a %in% c("Yes (briefly describe the within host aspect included)", "Other/unsure (please explain)", ""))%>%
+  select(Q4, Q23a, Q23a_1_TEXT,Q23a_3_TEXT)
+#looks like most of the "others" arent true within host, will have to correct once I have all the data
+
+#clean within host
+#change the incorrectly labeled within host one for paper "10.1093/cid/cix439"
+within_host_clean = survey%>%
+  mutate(Q23a = ifelse(Q5 == "10.1093/cid/cix439", "Yes (briefly describe the within host aspect included)", Q23a)) %>%
+  mutate(Q23a = ifelse(Q23a=="", "No", Q23a))%>% #weird space in some of them
+  mutate(Q23a=ifelse(Q23a == "Other/unsure (please explain)", "No", Q23a)) #hand checked all of these, they are all no's lol
+
+percent_withinhost_clean <- within_host_clean %>%
+  group_by(Q23a) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+###data use
+#how were data used, q31
+percent_datause <- survey %>%
+  group_by(Q31) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+
+#what kind of data, q32
+percent_datakind <- survey %>%
+  group_by(Q32) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / 264 * 100)%>%
+  arrange(desc(Percentage))
+
+#separate out multiple entries
+percent_datakind2=  survey%>%
+  separate(Q32, into = c("Data1", "Data2", "Data3", "Data4", "Data5", "Data6", "Data7"), sep = ",", remove = FALSE, convert = TRUE)%>%
+  select(-Q32)%>%
+  pivot_longer(cols = starts_with("Data"), names_to = "Dat_Column", values_to = "Count") %>%
+  na.omit()%>%
+  group_by(Count)%>%
+  select(Q4, Q5, Count)%>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / 265 * 100)%>%
+  arrange(desc(Percentage))%>%
+  filter(!row_number() %in% 9:12)#weird ones separated by commas but not actual categories
+
+```
+
+```{r outputs q35-37}
+#q35, what outputs in results
+#lots of combo's here, going to have to decide if want to deal with combos or just plain percentages (prob preferred)
+percent_outputs <- survey %>%
+  group_by(Q35) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#to deal with multiples, need to separate the ones with multiple commas and count separately
+data_prep_outputs <- survey %>%
+  separate(Q35, c("output1", "output2", "output3", "output4", "output5", "output6", "output7", "output8","output9", "output10", "output11"),sep=",", remove=F, convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+data_prep_outputs <- data_prep_outputs %>%
+  pivot_longer(cols = starts_with("output"), names_to = "Output_Column", values_to = "Output")
+
+# Group by year (Q3) and calculate the combined counts
+data_prep_outputs$Q3 <- as.numeric(data_prep_outputs$Q3)
+outputs_unique = data_prep_outputs %>%
+  select(Output) %>%
+  group_by(word = Output) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / 311 * 100)%>%
+  arrange(desc(percentage))
+
+outputs_unique <- outputs_unique %>%
+  mutate(word = reorder(word, percentage))
+
+# Now create the plot
+outputs_plot=ggplot(outputs_unique, aes(x = percentage, y = word)) +
+  geom_bar(stat = "identity", fill = "navy") +
+  labs(title = "Outputs in results section", x = "Percentage", y = "") +
+  theme_classic() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+#look at "others"
+outputs_other = data_prep_outputs%>%
+  pivot_longer(cols = starts_with("Out"), names_to = "Output_Column", values_to = "Output")%>%
+  select(Q4, Q5, Count, Q35_16_TEXT)%>%
+  filter(Count == "Other (specify below)")
+
+
+#q36, outputs examined as a function of what
+percent_output_functions <- survey %>%
+  group_by(Q36) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#now deal with all the multiple answers
+data_prep_functions <- survey %>%
+  mutate(Q36 = str_replace(Q36, "\\s*\\(.*|\\s*-.*", ""))%>%
+  separate(Q36, c("function1", "function2", "function3", "function4", "function5", "function6", "function7", "function8","function9", "function10", "function11", "function12", "function13"),sep=",", remove=F, convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+data_prep_functions <- data_prep_functions %>%
+  pivot_longer(cols = starts_with("function"), names_to = "Functions_Column", values_to = "Count")
+  
+
+
+# Group by year (Q3) and calculate the combined counts
+data_prep_functions$Q3 <- as.numeric(data_prep_functions$Q3)
+functions_unique = data_prep_functions %>%
+  select(Count) %>%
+  group_by(word = Count) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / 311 * 100)%>%
+  arrange(desc(percentage))
+
+functions_unique <- functions_unique %>%
+  mutate(word = reorder(word, percentage))
+
+# Now create the plot
+functions_plot=ggplot(functions_unique, aes(x = percentage, y = word)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "Outputs as a function of...", x = "Percentage", y = "") +
+  theme_classic() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+#q37 - single vs. multiple path models compared?
+#will have to investigate the others
+percent_mult_models <- survey %>%
+  group_by(Q37) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+#"how did they compare "other" answers to q37 - decide how want to incorporate
+mult_others <- survey %>%
+  group_by(Q37_3_TEXT) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#if yes to 37, how did the multiple model compare to the single
+percent_mult_diffs <- survey %>%
+  group_by(Q37a) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+```
+
+```{r outputs q35-37 for subsets like hiv/tb and interventions}
+prep_outputs_hivtb <- survey %>%
+  subset(Path1 == "HIV" & Path2 == "Mycobacterium tuberculosis")%>%
+  separate(Q35, c("output1", "output2", "output3", "output4", "output5", "output6", "output7", "output8","output9", "output10", "output11"),sep=",", remove=F, convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+prep_outputs_hivtb <- prep_outputs_hivtb %>%
+  pivot_longer(cols = starts_with("output"), names_to = "Output_Column", values_to = "Count")
+
+# Group by year (Q3) and calculate the combined counts
+prep_outputs_hivtb$Q3 <- as.numeric(prep_outputs_hivtb$Q3)
+outputs_hivtb = prep_outputs_hivtb %>%
+  select(Count) %>%
+  group_by(word = Count) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / sum(Count) * 100)%>%
+  arrange(desc(percentage))
+
+outputs_hivtb <- outputs_hivtb %>%
+  mutate(word = reorder(word, percentage))
+
+# Now create the plot
+outputs_plot_hivtb=ggplot(outputs_hivtb, aes(x = percentage, y = word)) +
+  geom_bar(stat = "identity", fill = "navy") +
+  labs(title = "Outputs in results section", x = "Percentage", y = "") +
+  theme_classic() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+###now do with interventions subset
+prep_outputs_interventions <- survey %>%
+  subset(Q27=="Yes")%>%
+  separate(Q35, c("output1", "output2", "output3", "output4", "output5", "output6", "output7", "output8","output9", "output10", "output11"),sep=",", remove=F, convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+prep_outputs_interventions <- prep_outputs_interventions %>%
+  pivot_longer(cols = starts_with("output"), names_to = "Output_Column", values_to = "Count")
+
+# Group by year (Q3) and calculate the combined counts
+prep_outputs_interventions$Q3 <- as.numeric(prep_outputs_interventions$Q3)
+outputs_interventions = prep_outputs_interventions %>%
+  select(Count) %>%
+  group_by(word = Count) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / sum(Count) * 100)%>%
+  arrange(desc(percentage))
+
+outputs_interventions <- outputs_interventions %>%
+  mutate(word = reorder(word, percentage))
+
+# Now create the plot
+outputs_plot_interventions=ggplot(outputs_interventions, aes(x = percentage, y = word)) +
+  geom_bar(stat = "identity", fill = "navy") +
+  labs(title = "Outputs in results section", x = "Percentage", y = "") +
+  theme_classic() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+####outputs for interventions
+#now deal with all the multiple answers
+prep_functions_interventions <- survey %>%
+  mutate(Q36 = str_replace(Q36, "\\s*\\(.*|\\s*-.*", ""))%>%
+  subset(Q27 =="Yes")%>%
+  separate(Q36, c("function1", "function2", "function3", "function4", "function5", "function6", "function7", "function8","function9", "function10", "function11", "function12", "function13"),sep=",", remove=F, convert =T)
+
+#manipulate the data format to long so can plot all the modes at once
+prep_functions_interventions <- prep_functions_interventions %>%
+  pivot_longer(cols = starts_with("function"), names_to = "Functions_Column", values_to = "Count")
+  
+
+
+# Group by year (Q3) and calculate the combined counts
+prep_functions_interventions$Q3 <- as.numeric(prep_functions_interventions$Q3)
+functions_interventions= prep_functions_interventions %>%
+  select(Count) %>%
+  group_by(word = Count) %>%
+  summarize(Count = n()) %>%
+  ungroup()%>%
+  filter(!is.na(word) & word != "")%>%
+  mutate(percentage = Count / sum(Count) * 100)%>%
+  arrange(desc(percentage))
+
+functions_interventions <- functions_interventions %>%
+  mutate(word = reorder(word, percentage))
+
+# Now create the plot
+functions_plot_interventions=ggplot(functions_interventions, aes(x = percentage, y = word)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "Outputs as a function of...", x = "Percentage", y = "") +
+  theme_classic() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+```
+
+```{r patterns for including co-infecteds and param values for mono vs uninfected}
+#q23, q23e, 23f, 23g, 24, 25
+#do coinfecteds have diff param values?
+percent_c0_params <- survey %>%
+  group_by(Q23) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#which params are diff?
+#currently as diff combos, will probably want to melt and just make it total percentages
+#will need to look at other to see if there is anything consistent to pull out
+#will need to decide if i want to sort through the susceptibility issue for monos vs un vs. co infected to correct all those answers
+percent_coparams_diff <- survey %>%
+  group_by(Q23f) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#separate term for diff in symptoms, course, or severity in coinfecteds
+percent_co_course <- survey %>%
+  group_by(Q23g) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#do mono infecteds have diff susceptibility? may need to also tease out from people misunderstanding 23f
+percent_mono_suscep <- survey %>%
+  group_by(Q24) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#does model include cross immunity
+#may have to investigate the yes's to double check correctness; maybe not
+percent_cross_immunity <- survey %>%
+  group_by(Q25) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+```
+
+```{r External/shared factors in models}
+#surveillance or reporting errors
+percent_surveillance <- survey %>%
+  group_by(Q26) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#shared impacts of an intervention
+percent_shared_impacts <- survey %>%
+  group_by(Q27) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#interruptions in services
+percent_interruptions <- survey %>%
+  group_by(Q28) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#change in healthcare seeking behavior
+percent_care_seeking <- survey %>%
+  group_by(Q29) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#any other external factors that shape transmission of both?
+percent_external_other <- survey %>%
+  group_by(Q30) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+
+#what factors?
+#will probably want to exlcude interventions since that is answered above
+#will also have to get rid of combos to get straight percentages
+percent_external_options <- survey %>%
+  group_by(Q30a) %>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / sum(count) * 100)%>%
+  arrange(desc(Percentage))
+```
+
+In looking at how many pathogens are modeled together by year there is no major pattern, we mostly just see an increase in the number of co-circulation papers starting in 2020 (makes sense). Which pathogens together? HIV/TB is big winner, then lots of other HIV. Relatively few respiratory-respiratory pairs so far in these data. Respiratory does have a big relative increase in 2023. STI and Other together are always the biggest, because that's HIV. 
+
+Ok now look at similarities between pathogens modeled together by the authors to look at why they may have picked them to model together
+```{r Pathogen similarities}
+#Q40 is ecological, Q41 is bio, Q42 is clinical, Q43 is write in
+
+##check others out of similarity
+eco_other = survey%>%
+  select(Q4, Q5, Path1, Path2, Q40, Q40_7_TEXT)%>%
+  separate(Q40, into = c("Q40a", "Q40b", "Q40c"), sep = "\\.,", remove = FALSE, convert = TRUE)
+
+##shared geographic range seems to be commonly identified as an "other". want to pull that out as its own category
+strings_to_search <- c("geo", "range", "region")
+string_to_add <- "Shared geographic range"
+
+survey$Q40 <- ifelse(
+  grepl(paste(strings_to_search, collapse = "|"), survey$Q40_7_TEXT, ignore.case = TRUE), 
+  string_to_add, 
+  gsub("Other", "", survey$Q40)
+)
+
+#Q40 ecological similarities
+eco_similarity_counts <- survey %>%
+  select(Q40)%>%
+  separate(Q40, into = c("Q40a", "Q40b", "Q40c"), sep = "\\.,", remove = FALSE, convert = TRUE)
+  
+  
+eco_similarity_counts <- eco_similarity_counts %>%
+  select(-Q40) %>%
+  pivot_longer(cols = starts_with("Q40"), names_to = "Q40_Column", values_to = "Count") %>%
+  mutate(across(Count, ~ifelse(grepl("environmental drivers", .), "Shared environmental drivers", .))) %>%
+  mutate(across(Count, ~ifelse(grepl("nchronicity, or some other time-related element of transmission", .), "Shared seasonality, synchronicity, or some other time-related element of transmission", .))) %>%
+  na.omit()
+
+###first just yes vs. no
+response_counts <- eco_similarity_counts %>%
+  select(-Q40_Column) %>%
+  mutate(Count = if_else(Count == "", "No ecological similarities noted by the authors", Count))%>% #change blanks to nos
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  mutate(percentage = count / 311 * 100,
+         response_type = ifelse(Count == "No ecological similarities noted by the authors", "No", "Yes"))
+
+overall_percentage <- response_counts %>%
+  summarise(percent_yes = sum(percentage[response_type == "Yes"]),
+            percent_no = sum(percentage[response_type == "No"]))
+
+ggplot(response_counts, aes(x = "", y = percentage, fill = response_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  scale_fill_manual(values = c("lightgrey", "darkgrey")) +
+  theme(legend.position = "none",
+        plot.caption = element_text(size = 14)) +  # Adjust the font size here
+  ggtitle("Responses with Ecological Similarities") +
+  labs(caption = sprintf("Overall Percentages:\nYes - %.2f%%\nNo - %.2f%%",
+                         overall_percentage$percent_yes,
+                         overall_percentage$percent_no))
+
+###ok now just yeses
+yes_sum = 311 -sum(response_counts$count[response_counts$Count == "No ecological similarities noted by the authors"])
+
+eco_yes = eco_similarity_counts%>%
+  mutate(Count = if_else(Count == "", "No ecological similarities noted by the authors", Count))%>%
+  select(-Q40_Column)%>%
+  filter(Count!="No ecological similarities noted by the authors")%>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / yes_sum * 100) #use number of models as denominator, not number of answers since some models got multiple answers
+
+##look at co-occurrence
+#go back to original wide format
+eco_co_occur <- survey %>%
+  select(Q40) %>%
+  separate(Q40, into = c("Q40a", "Q40b", "Q40c"), sep = "\\.,", remove = FALSE, convert = TRUE) %>%
+  rowwise() %>%
+  mutate(shared_both = ifelse(any(grepl("Shared environmental drivers", c(Q40a, Q40b, Q40c))) & 
+                              any(grepl("Shared seasonality, synchronicity", c(Q40a, Q40b, Q40c))), 
+                            1, 0))%>%
+  filter(shared_both==1) %>%
+  nrow()
+
+
+# Create the pie chart
+eco_sim_plot <- ggplot(response_counts, aes(x = "", y = count, fill = Count)) +
+  geom_bar(stat = "identity") +
+  coord_polar(theta = "y") +
+  labs(title = "Ecological Similarities") +
+  theme_void() +
+  theme(plot.caption = element_text(size = 14))+
+  scale_fill_viridis_d() +
+  geom_text(aes(x = 1.5, label = scales::percent(percentage, scale = 1, accuracy = 0.01)), position = position_stack(vjust = 0.5))
+
+####biological similarities
+bio_similarity_counts <- survey %>%
+  select(Q41)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d"), sep = ",", remove = FALSE, convert = TRUE)
+
+##clean up the extraneous info from eg examples that were comma separated
+selected_columns <- c("Q41a", "Q41b", "Q41c", "Q41d")
+bio_similarity_counts <- bio_similarity_counts %>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("he Zika and dengue viruses both", .), "NA",
+                                                      ifelse(grepl("etc", .), "NA", .))))
+
+  
+
+bio_similarity_counts <- bio_similarity_counts %>%
+  select(-Q41) %>%
+  pivot_longer(cols = starts_with("Q41"), names_to = "Q41_Column", values_to = "Count") %>%
+  mutate(Count = ifelse(grepl("Shared nonhuman hosts or vectors", Count), "Shared nonhuman hosts or vectors", Count)) %>%
+  na.omit()
+
+response_counts_bio <- bio_similarity_counts %>%
+  filter(Count != "NA") %>%
+  select(-Q41_Column) %>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  mutate(percentage = count / sum(count) * 100,
+         response_type = ifelse(Count == "No biological similarities noted by the authors", "No", "Yes"))
+
+
+overall_percentage_bio <- response_counts_bio %>%
+  summarise(percent_yes = sum(percentage[response_type == "Yes"]),
+            percent_no = sum(percentage[response_type == "No"]))
+
+
+ggplot(response_counts_bio, aes(x = "", y = percentage, fill = response_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  scale_fill_manual(values = c("lightgrey", "darkgrey")) +
+  theme(legend.position = "none",
+        plot.caption = element_text(size = 14)) +  # Adjust the font size here
+  ggtitle("Responses with Biological Similarities") +
+  labs(caption = sprintf("Overall Percentages:\nYes - %.2f%%\nNo - %.2f%%",
+                         overall_percentage_bio$percent_yes,
+                         overall_percentage_bio$percent_no))
+
+response_counts_bio <- bio_similarity_counts %>%
+  filter(Count != "NA") %>%
+  select(-Q41_Column) %>%
+  filter(Count!="No biological similarities noted by the authors")%>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+   mutate(percentage = count / sum(count) * 100)
+
+
+# Create the pie chart
+bio_sim_plot <- ggplot(response_counts_bio, aes(x = "", y = count, fill = Count)) +
+  geom_bar(stat = "identity") +
+  coord_polar(theta = "y") +
+  labs(title = "Biological Similarities") +
+  theme_void() +
+  theme(plot.caption = element_text(size = 14))+
+  scale_fill_viridis_d() +
+  geom_text(aes(x = 1.5, label = scales::percent(percentage, scale = 1, accuracy = 0.01)), position = position_stack(vjust = 0.5))
+
+
+#####clinical similarities
+clin_similarity_counts <- survey %>%
+  select(Q42)%>%
+  separate(Q42, into = c("Q42a", "Q42b", "Q42c", "Q42d", "Q42e", "Q42f", "Q42g", "Q42h", "Q42i", "Q42j"), sep = ",", remove = FALSE, convert = TRUE)
+
+##clean up the extraneous info from eg examples that were comma separated
+selected_columns <- c("Q42a", "Q42b", "Q42c", "Q42d", "Q42e", "Q42f", "Q42g", "Q42h", "Q42i", "Q42j")
+clin_similarity_counts <- clin_similarity_counts %>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("similar symptoms)", .), "NA",
+                                           ifelse(grepl("duration", .), "NA", 
+                                           ifelse(grepl("or progression", .), "NA",
+                                           ifelse(grepl("both pathogens are chronic", .), "NA",
+                                           ifelse(grepl("self-limiting", .), "NA",
+                                            ifelse(grepl("etc", .), "NA",.))))))))
+
+  
+clin_similarity_counts <- clin_similarity_counts %>%
+  select(-Q42) %>%
+  pivot_longer(cols = starts_with("Q42"), names_to = "Q42_Column", values_to = "Count") %>%
+  mutate(Count = ifelse(grepl("Similar clinical presentation", Count), "Similar clinical presentation", Count)) %>%
+  na.omit()
+
+
+response_counts_clin = clin_similarity_counts%>%
+  filter(Count != "NA")%>%
+  select(-Q42_Column)%>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / 311 * 100, response_type = ifelse(Count == "No clinical or epidemiological similarities mentioned by the authors", "No", "Yes"))%>%
+  arrange(desc(percentage))
+
+
+overall_percentage_clin <- (311-sum(response_counts_clin$count[response_counts_clin$response_type == "No"]))/311
+
+ggplot(response_counts_clin, aes(x = "", y = percentage, fill = response_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  scale_fill_manual(values = c("lightgrey", "darkgrey")) +
+  theme(legend.position = "none",
+        plot.caption = element_text(size = 14)) +  # Adjust the font size here
+  ggtitle("Responses with Clinical Similarities") +
+  labs(caption = sprintf("Overall Percentages:\nYes - %.2f%%\nNo - %.2f%%",
+                         overall_percentage_clin$percent_yes,
+                         overall_percentage_clin$percent_no))
+
+yes_sum_clin = 311 -sum(response_counts_clin$count[response_counts_clin$Count == "No clinical or epidemiological similarities mentioned by the authors"])
+
+response_counts_clin = clin_similarity_counts%>%
+  filter(Count != "NA")%>%
+  filter(Count != "No clinical or epidemiological similarities mentioned by the authors")%>%
+  select(-Q42_Column)%>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count /yes_sum_clin * 100)%>%
+  arrange(desc(percentage))
+
+
+# Create the pie chart
+clin_sim_plot <- ggplot(response_counts_clin, aes(x = "", y = count, fill = Count)) +
+  geom_bar(stat = "identity") +
+  coord_polar(theta = "y") +
+  labs(title = "Clinical Similarities") +
+  theme_void() +
+  scale_fill_viridis_d() +
+  geom_text(aes(x = 1.5, label = scales::percent(percentage, scale = 1, accuracy = 0.01)), position = position_stack(vjust = 0.5), angle=25)
+
+##check others
+clin_other = survey%>%
+  select(Q4, Q5, Path1, Path2, Q42, Q42_11_TEXT)%>%
+  separate(Q42, into = c("Q42a", "Q42b", "Q42c", "Q42d", "Q42e", "Q42f", "Q42g", "Q42h", "Q42i", "Q42j"), sep = "\\.,", remove = FALSE, convert = TRUE)
+```
+
+```{r correct biological similarities on cross-protection - CHECK BY HAND WITH NEW DATA}
+bio_similarity_counts <- survey %>%
+  select(Q4, Q5, Path1, Path2, Path3, Path4, Path5, Path6, Q41)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d"), sep = ",", remove = FALSE, convert = TRUE)
+
+##clean up the extraneous info from eg examples that were comma separated
+selected_columns <- c("Q41a", "Q41b", "Q41c", "Q41d")
+bio_similarity_counts_check <- bio_similarity_counts %>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("he Zika and dengue viruses both", .), "NA",
+                                                      ifelse(grepl("etc", .), "NA", .))))%>%
+    filter(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens", Q41))
+
+bio_similarity_clean <- survey%>%
+  mutate(across(Q41, ~ifelse(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens(,|$)", .) &
+                              (Path1 %in% c("HIV", "Plasmodium spp", "Sars-Cov-2", "Chlamydia trachomatis") | 
+                               Path2 %in% c("HIV", "Plasmodium spp", "Sars-Cov-2", "Chlamydia trachomatis")), 
+                              gsub("Immunological cross-protection or immunological cross-enhancement between pathogens", "", .), 
+                              .)))%>%
+  select(Q4, Q5, Path1, Path2, Path3, Path4, Path5, Path6, Q41, Q41_8_TEXT)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d"), sep = ",", remove = FALSE, convert = TRUE)%>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("he Zika and dengue viruses both", .), "NA",
+    ifelse(grepl("etc", .), "NA", .))))%>%
+    mutate(Q41 = ifelse(Q41a == "", "", Q41)) 
+
+bio_similarity_counts_check2 <- bio_similarity_clean %>%
+    filter(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens", Q41))
+ 
+
+bio_sim_counts_clean <- bio_similarity_clean %>%
+  select(-Q41, -Q41_8_TEXT) %>%
+  pivot_longer(cols = starts_with("Q41"), names_to = "Q41_Column", values_to = "Count") %>%
+  mutate(Count = ifelse(grepl("Shared nonhuman hosts or vectors", Count), "Shared nonhuman hosts or vectors", Count)) %>%
+  na.omit()
+
+counts_bio_clean <- bio_sim_counts_clean %>%
+  mutate(Count = ifelse(Count == "", "No biological similarities noted by the authors", Count))%>%
+  filter(Count != "NA") %>%
+  select(-Q41_Column) %>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  mutate(percentage = count / 311 * 100,
+         response_type = ifelse(Count == "No biological similarities noted by the authors", "No", "Yes"))
+
+
+overall_percentage_bio <- counts_bio_clean %>%
+  summarise(percent_yes = sum(percentage[response_type == "Yes"]),
+            percent_no = sum(percentage[response_type == "No"]))
+
+yes_bio=311-sum(counts_bio_clean$count[counts_bio_clean$Count == "No biological similarities noted by the authors"])
+response_counts_bio <- bio_sim_counts_clean %>%
+  mutate(Count = ifelse(Count == "", "No biological similarities noted by the authors", Count))%>%
+  filter(Count != "NA") %>%
+  select(-Q41_Column) %>%
+  filter(Count!="No biological similarities noted by the authors")%>%
+  group_by(Count) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+   mutate(percentage = count / yes_bio * 100)%>%
+  arrange(desc(percentage))
+
+
+# Create the pie chart
+bio_sim_plot <- ggplot(response_counts_bio, aes(x = "", y = count, fill = Count)) +
+  geom_bar(stat = "identity") +
+  coord_polar(theta = "y") +
+  labs(title = "Biological Similarities") +
+  theme_void() +
+  theme(plot.caption = element_text(size = 14))+
+  scale_fill_viridis_d() +
+  geom_text(aes(x = 1.5, label = scales::percent(percentage, scale = 1, accuracy = 0.01)), position = position_stack(vjust = 0.5))
+
+bio_other = survey%>%
+  select(Q4, Q5, Path1, Path2, Q41, Q41_8_TEXT)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d"), sep = "\\.,", remove = FALSE, convert = TRUE)
+```
+
+```{r supplemental - co-occurrence for enviro, bio, clinical similarities}
+###ecological co-occurrence
+eco_similarity_counts <- survey %>%
+  select(Q40)%>%
+  separate(Q40, into = c("Q40a", "Q40b", "Q40c"), sep = "\\.,", remove = FALSE, convert = TRUE)
+  
+eco_similarity_counts <- eco_similarity_counts %>%
+  select(-Q40) %>%
+  rowid_to_column() %>%
+  mutate(Q40a = na_if(Q40a, ""))%>%
+  pivot_longer(cols = starts_with("Q40"), names_to = "Q40_Column", values_to = "Count") %>%
+  mutate(across(Count, ~ifelse(grepl("environmental drivers", .), "Shared environmental drivers", .))) %>%
+  mutate(across(Count, ~ifelse(grepl("nchronicity, or some other time-related element of transmission", .), "Shared seasonality, synchronicity, or some other time-related element of transmission", .))) %>%
+    mutate(across(Count, ~ifelse(grepl("specify below", .), "Other", .))) %>%
+  na.omit()
+eco_similarity_counts
+
+eco_counts = eco_similarity_counts%>%
+group_by(rowid)%>%
+  filter(n() > 1) %>%
+  mutate(pair = list(combn(sort(Count), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+eco_counts$Var2[eco_counts$Var2=="Shared seasonality, synchronicity, or some other time-related element of transmission"] <- "Shared seasonality"
+
+heatmap_eco <- eco_counts[rep(seq_len(nrow(eco_counts)), eco_counts$count), ]
+
+heatmap_eco <- heatmap_eco %>%
+  mutate(pair = pmap_chr(list(Var1, Var2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")
+
+swapped_eco <- heatmap_eco[, c("Var1", "Var2", names(heatmap_eco)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(swapped_eco)[1:2] <- c("Var1", "Var2")
+
+# Combine the original dataframe with the new swapped dataframe
+eco_combined <- rbind(heatmap_eco, swapped_eco)
+
+eco_heatmap = ggplot(eco_combined, aes(x = Var1, y = Var2, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(title = "A.", x = " ", y = " ", fill = "Frequency") +
+  ggtitle("A.") +
+  theme_minimal(base_size=14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+#####
+##biological co-occurrence
+bio_similarity_counts <- survey %>%
+  select(Q4, Q5, Path1, Path2, Path3, Path4, Path5, Path6, Q41)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d","Q41e", "Q41f"), sep = ",", remove = FALSE, convert = TRUE)
+
+##clean up the extraneous info from eg examples that were comma separated
+selected_columns <- c("Q41a", "Q41b", "Q41c", "Q41d", "Q41e", "Q41f")
+bio_similarity_counts_check <- bio_similarity_counts %>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("he Zika and dengue viruses both", .), "NA",
+                                                      ifelse(grepl("etc", .), "NA", .))))%>%
+    filter(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens", Q41))
+
+bio_similarity_clean <- survey%>%
+  mutate(across(Q41, ~ifelse(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens(,|$)", .) &
+                              (Path1 %in% c("HIV", "Plasmodium spp", "Sars-Cov-2", "Chlamydia trachomatis") | 
+                               Path2 %in% c("HIV", "Plasmodium spp", "Sars-Cov-2", "Chlamydia trachomatis")), 
+                              gsub("Immunological cross-protection or immunological cross-enhancement between pathogens", "", .), 
+                              .)))%>%
+  select(Q4, Q5, Path1, Path2, Path3, Path4, Path5, Path6, Q41, Q41_8_TEXT)%>%
+  separate(Q41, into = c("Q41a", "Q41b", "Q41c", "Q41d", "Q41e", "Q41f"), sep = ",", remove = FALSE, convert = TRUE)%>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("he Zika and dengue viruses both", .), NA,
+    ifelse(grepl("etc", .), NA, .))))%>%
+    mutate(Q41a = ifelse(Q41a == "", "", Q41a))%>%
+  mutate(Q41a = na_if(Q41a, ""))%>%
+   filter(rowSums(!is.na(select(., Q41b:Q41f))) > 0) #just keeps papers where there is more than one similarity
+
+#bio_similarity_counts_check2 <- bio_similarity_clean %>%
+    #filter(grepl("Immunological cross-protection or immunological cross-enhancement between pathogens", Q41))
+
+bio_sim_counts_clean <- bio_similarity_clean %>%
+  select(Q41a, Q41b, Q41c, Q41d, Q41e, Q41f) %>%
+  rowid_to_column() %>%
+  pivot_longer(cols = starts_with("Q41"), names_to = "Q41_Column", values_to = "Count") %>%
+  mutate(Count = ifelse(grepl("Shared nonhuman hosts or vectors", Count), "Shared nonhuman hosts or vectors", Count)) %>%
+  na.omit()%>%
+  filter(Count != "No biological similarities noted by the authors")%>%
+  group_by(rowid)%>%
+  filter(n() > 1) %>%
+  mutate(pair = list(combn(sort(Count), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+bio_sim_counts_clean$Var1[bio_sim_counts_clean$Var1=="Evolutionary relatedness (e.g. sister species or recent common ancestor)"] <- "Evolutionary relatedness"
+bio_sim_counts_clean$Var2[bio_sim_counts_clean$Var2=="Evolutionary relatedness (e.g. sister species or recent common ancestor)"] <- "Evolutionary relatedness"
+bio_sim_counts_clean$Var1[bio_sim_counts_clean$Var1=="Other (specify below)"] <- "Other"
+bio_sim_counts_clean$Var2[bio_sim_counts_clean$Var2=="Other (specify below)"] <- "Other"
+bio_sim_counts_clean$Var1[bio_sim_counts_clean$Var1=="Immunological cross-protection or immunological cross-enhancement between pathogens"] <- "Immunological cross-protection"
+bio_sim_counts_clean$Var2[bio_sim_counts_clean$Var2=="Immunological cross-protection or immunological cross-enhancement between pathogens"] <- "Immunological cross-protection"
+
+heatmap_bio <- bio_sim_counts_clean[rep(seq_len(nrow(bio_sim_counts_clean)), bio_sim_counts_clean$count), ]
+
+heatmap_bio <- heatmap_bio %>%
+  mutate(pair = pmap_chr(list(Var1, Var2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")
+
+swapped_bio <- heatmap_bio[, c("Var1", "Var2", names(heatmap_bio)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(swapped_bio)[1:2] <- c("Var1", "Var2")
+
+# Combine the original dataframe with the new swapped dataframe
+bio_combined <- rbind(heatmap_bio, swapped_bio)
+
+bio_heatmap = ggplot(bio_combined, aes(x = Var1, y = Var2, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(title = "B", x = " ", y = " ", fill = "Frequency") +
+  ggtitle("B.") +
+  theme_minimal(base_size=14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+############################
+##clinical co-occurrence
+clin_similarity_counts <- survey %>%
+  select(Q42)%>%
+  separate(Q42, into = c("Q42a", "Q42b", "Q42c", "Q42d", "Q42e", "Q42f", "Q42g", "Q42h", "Q42i", "Q42j"), sep = ",", remove = FALSE, convert = TRUE)%>%
+  select(-Q42)
+
+##clean up the extraneous info from eg examples that were comma separated
+selected_columns <- c("Q42a", "Q42b", "Q42c", "Q42d", "Q42e", "Q42f", "Q42g", "Q42h", "Q42i", "Q42j")
+clin_similarity_counts <- clin_similarity_counts %>%
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("similar symptoms)", .), NA,
+                                           ifelse(grepl("duration", .), NA, 
+                                           ifelse(grepl("or progression", .), NA,
+                                           ifelse(grepl("both pathogens are chronic", .), NA,
+                                           ifelse(grepl("self-limiting", .), NA,
+                                            ifelse(grepl("etc", .), NA,.))))))))%>%
+  filter(rowSums(!is.na(select(., Q42b:Q42j))) > 0) #just keeps papers where there is more than one similarity
+
+clin_long <- clin_similarity_counts %>%
+  rowid_to_column() %>%
+  pivot_longer(cols = starts_with("Q42"), names_to = "42_num", values_to = "Clin") %>%
+  filter(!(is.na(Clin) | Clin == ""))%>%
+  arrange(rowid)%>%
+  filter(Clin!="NA") #get rid of NAs
+
+clin_counts <- clin_long %>%
+  group_by(rowid) %>%
+  mutate(pair = list(combn(sort(Clin), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+clin_counts$Var1[clin_counts$Var1=="Other (specify below)"] <- "Other"
+clin_counts$Var2[clin_counts$Var2=="Other (specify below)"] <- "Other"
+clin_counts$Var1[clin_counts$Var1=="No clinical or epidemiological similarities mentioned by the authors"] <- "No clinical or epidemiological similarities"
+clin_counts$Var2[clin_counts$Var2=="No clinical or epidemiological similarities mentioned by the authors"] <- "No clinical or epidemiological similarities"
+clin_counts$Var1[clin_counts$Var1=="Potential for cross-reactivity (serological or other) between the two pathogens in a diagnostic test"] <- "Potential for cross-reactivity"
+clin_counts$Var2[clin_counts$Var2=="Potential for cross-reactivity (serological or other) between the two pathogens in a diagnostic test"] <- "Potential for cross-reactivity"
+clin_counts$Var1[clin_counts$Var1=="Similar clinical presentation (i.e."] <- "Similar clinical presentation"
+clin_counts$Var2[clin_counts$Var2=="Similar clinical presentation (i.e."] <- "Similar clinical presentation"
+
+heatmap_clin <- clin_counts[rep(seq_len(nrow(clin_counts)), clin_counts$count), ]
+
+heatmap_clin <- heatmap_clin %>%
+  mutate(pair = pmap_chr(list(Var1, Var2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")
+
+swapped_clin <- heatmap_clin[, c("Var1", "Var2", names(heatmap_clin)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(swapped_clin)[1:2] <- c("Var1", "Var2")
+
+# Combine the original dataframe with the new swapped dataframe
+clin_combined <- rbind(heatmap_clin, swapped_clin)
+
+clin_heatmap = ggplot(clin_combined, aes(x = Var1, y = Var2, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(title = "C", x = " ", y = " ", fill = "Frequency") +
+  ggtitle("C.") +
+  theme_minimal(base_size=14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+fig_s1 = ggarrange(eco_heatmap, bio_heatmap, clin_heatmap, nrow = 3)
+###too hard to see with the crazy labels, will jjust put them together in illustrator
+```
+
+```{r similarity index}
+#first just collect the questions involved so can turn them into a point system; also included number of pathogens (Q13)
+#now make things into points
+survey_sim_index <- survey %>%
+  select(Q5, Q13, Q23, Q23a, Q23b, Q23c, Q23d, Q23f, Q23g, Q24, Q25, Q26, Q27, Q28, Q29, Q30) %>%
+  mutate(Q23_no = if_else(Q23 == "Yes" | Q23 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q23a_no = if_else(Q23a == "Yes" | Q23a == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q23b_no = if_else(Q23b == "Yes" | Q23b == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q23c_no = if_else(Q23c == "Direct antagonistic interaction" | Q23c == "Direct beneficial interation"|Q23c == "Indirect antagonistic interaction"|Q23c == "Indirect beneficial interaction" , 1, 0)) %>%
+  mutate(Q23d_no = if_else(Q23d == "Yes" | Q23d == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q23g_no = if_else(Q23g == "Yes" | Q23g == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q24_no = if_else(Q24 == "Yes" | Q24 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q25_no = if_else(Q25 == "Yes" | Q25 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q26_no = if_else(Q26 == "Yes" | Q26 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q27_no = if_else(Q27 == "Yes" | Q27 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q28_no = if_else(Q28 == "Yes" | Q28 == "Other/unsure (please explain)", 1, 0)) %>%
+  mutate(Q29_no = if_else(Q29 == "Yes" | Q29 == "Other/unsure (please explain)", 1, 0))%>%
+mutate(Q30_no = if_else(Q30 == "Yes" | Q30 == "Other/unsure (please explain)", 1, 0))
+
+##now break out the different params from Q23f to count and get rid of double susceptibility one
+survey_sim_index = survey_sim_index %>%
+  mutate(Q23f_i = if_else(grepl("Contact rates", Q23f), 1, 0),
+    Q23f_ii = if_else(grepl("Incubation period", Q23f), 1, 0),
+    Q23f_iii = if_else(grepl("Infectiousness", Q23f), 1, 0),
+    Q23f_iv = if_else(grepl("Infection-induced mortality", Q23f), 1, 0),
+    Q23f_v = if_else(grepl("Infectious period", Q23f), 1, 0),
+    Q23f_vi = if_else(grepl("Recovery time", Q23f), 1, 0),
+    Q23f_vii = if_else(grepl("Susceptibility to other pathogens in the model", Q23f), 1, 0),
+    Q23f_viii = if_else(grepl("Other/unsure", Q23f), 1, 0))%>%
+  select(-Q23f_vii) #decided this questions was poorly worded and needed to be thrown out
+  
+
+
+survey_sim_index = survey_sim_index%>%
+  #don't need below anymore for Q23f because already separated them out
+  #mutate(Q23f_count = str_count(Q23f, ","))%>% #each param different has a comma between them, this just counts the commas. Note this would just count "other" as one
+  mutate(sim_index = Q23_no+Q23a_no+Q23b_no+Q23c_no+Q23d_no+Q23g_no+Q24_no+Q25_no+Q26_no+Q27_no+Q28_no+Q29_no+Q30_no+Q23f_i+Q23f_ii+Q23f_iii+Q23f_iv+Q23f_v+Q23f_vi+Q23f_viii)# now add all the differences together
+
+#similarity index breakdown
+percentage_scores_sim <- survey_sim_index %>%
+  group_by(sim_index) %>%
+  summarize(count = n()) %>%
+  mutate(percentage = (count / nrow(survey_sim_index)) * 100)%>%
+  arrange(desc(percentage))
+
+sim_index=ggplot(survey_sim_index, aes(x = sim_index)) +
+  geom_histogram(binwidth = 1, fill = "navy", color = "black") +
+  geom_vline(xintercept = 18, lty=4, 
+                color = "black", size=1.5)+
+  labs(title = "A.", x = " ", y = "Number of models") +
+  theme_classic(base_size=14)
+
+##correlation between different questions
+##first have to break out different options of changed parameters from Q23_f
+#Q23f_i = Contact_rates
+#Q23f_ii = Incubation_period
+#Q23f_iii = Infectiousness
+#Q23f_iv = Infection_induced_mortality
+#Q23f_v = Infectious_period 
+#Q23f_vi = Recovery_time
+#Q23f_vii = Susceptibility to other pathogens in the model
+#Q23f_viii = Other/unsure (explain below)
+
+sim_index_params = survey_sim_index %>%
+  mutate(
+    Q23f_i = if_else(grepl("Contact rates", Q23f), 1, 0),
+    Q23f_ii = if_else(grepl("Incubation period", Q23f), 1, 0),
+    Q23f_iii = if_else(grepl("Infectiousness", Q23f), 1, 0),
+    Q23f_iv = if_else(grepl("Infection-induced mortality", Q23f), 1, 0),
+    Q23f_v = if_else(grepl("Infectious period", Q23f), 1, 0),
+    Q23f_vi = if_else(grepl("Recovery time", Q23f), 1, 0),
+    Q23f_vii = if_else(grepl("Susceptibility to other pathogens in the model", Q23f), 1, 0),
+    Q23f_viii = if_else(grepl("Other/unsure", Q23f), 1, 0)
+  )
+
+###ok now try changing all the column names to something more informative to see if the labels work on the graph and don't look too crazy
+sim_index_params = survey_sim_index %>%
+  mutate(
+    #Q23f_i = if_else(grepl("Contact rates", Q23f), 1, 0),
+    #Q23f_ii = if_else(grepl("Incubation period", Q23f), 1, 0),
+    #Q23f_iii = if_else(grepl("Infectiousness", Q23f), 1, 0),
+    #Q23f_iv = if_else(grepl("Infection-induced mortality", Q23f), 1, 0),
+    #Q23f_v = if_else(grepl("Infectious period", Q23f), 1, 0),
+    #Q23f_vi = if_else(grepl("Recovery time", Q23f), 1, 0),
+    #Q23f_vii = if_else(grepl("Susceptibility to other pathogens in the model", Q23f), 1, 0),
+    #Q23f_viii = if_else(grepl("Other/unsure", Q23f), 1, 0)
+    
+    Contact_rates = if_else(grepl("Contact rates", Q23f), 1, 0),
+    Incubation = if_else(grepl("Incubation period", Q23f), 1, 0),
+    Infectiousness = if_else(grepl("Infectiousness", Q23f), 1, 0),
+    Mortality = if_else(grepl("Infection-induced mortality", Q23f), 1, 0),
+    Infectious_period = if_else(grepl("Infectious period", Q23f), 1, 0),
+    Recovery = if_else(grepl("Recovery time", Q23f), 1, 0),
+    #Susceptibility = if_else(grepl("Susceptibility to other pathogens in the model", Q23f), 1, 0),
+    Other = if_else(grepl("Other/unsure", Q23f), 1, 0)
+  )%>%
+  rename(`Coinfected hosts (Q23)` = Q23_no,
+         `Within-host aspects (Q23a)` = Q23a_no,
+         `Pathogen-pathogen interaction (Q23b)` = Q23b_no,
+         `Pathogen-pathogen directionality (Q23c)` = Q23c_no,
+         `Within-host, other (Q23d)` = Q23d_no,
+         `Disease course (Q23g)` = Q23g_no,
+         `Differing susceptibility (Q24)` = Q24_no,
+         `Cross immunity (Q25)` = Q25_no,
+         `Misdiagnosis (Q26)` = Q26_no,
+         `Interventions (Q27)` = Q27_no,
+         `Interrupted services (Q28)` = Q28_no,
+         `Healthcare seeking (Q29)` = Q29_no,
+         `External factors (Q30)` = Q30_no,
+         `Contact rates (Q23f)` = Contact_rates,
+         `Incubation (Q23f)` = Incubation,
+         `Infectiousness (Q23f)` = Infectiousness,
+         `Mortality (Q23f)` = Mortality,
+         `Infectious period (Q23f)` = Infectious_period,
+         `Recovery (Q23f)` = Recovery,
+         `Other (Q23f)` = Other
+  )
+
+##ok now breakdown to see which questions were more likely to generate points
+#not including within host other since that received no inputs
+percentage_q_sim <- sim_index_params %>%
+  pivot_longer(cols = c("Coinfected hosts (Q23)","Contact rates (Q23f)","Incubation (Q23f)","Infectiousness (Q23f)","Mortality (Q23f)","Infectious period (Q23f)","Recovery (Q23f)", "Within-host aspects (Q23a)","Pathogen-pathogen interaction (Q23b)", "Pathogen-pathogen directionality (Q23c)","Disease course (Q23g)","Differing susceptibility (Q24)", "Cross immunity (Q25)","Misdiagnosis (Q26)","Interventions (Q27)","Interrupted services (Q28)","Healthcare seeking (Q29)","External factors (Q30)"), names_to = "question")%>%
+  group_by(question, value) %>%
+  summarize(count = n()) %>%
+  mutate(percentage = (count / 311) * 100)%>%
+  filter(value != 0)%>%
+  arrange(desc(percentage))
+
+params_index <- ggplot(percentage_q_sim, aes(x = reorder(question, -count), y = count)) +
+  geom_bar(stat = "identity", fill = "navy", color = "black") +
+  labs(title = "B.", x = " ", y = "Number of models") +
+  theme_classic(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+#cor_columns = select(sim_index_params, c("Q23_no","Q23a_no", "Q23b_no","Q23c_no", "Q23d_no", "Q23f_i", "Q23f_ii", "Q23f_iii", "Q23f_iv", "Q23f_v", "Q23f_vi", "Q23f_vii", "Q23f_viii", "Q23g_no", "Q24_no", "Q25_no", "Q26_no", "Q27_no", "Q28_no", "Q29_no", "Q30_no"))
+cor_columns = select(sim_index_params, c("Coinfected hosts (Q23)","Contact rates (Q23f)","Incubation (Q23f)","Infectiousness (Q23f)","Mortality (Q23f)","Infectious period (Q23f)","Recovery (Q23f)", "Within-host aspects (Q23a)","Pathogen-pathogen interaction (Q23b)", "Pathogen-pathogen directionality (Q23c)","Disease course (Q23g)","Differing susceptibility (Q24)", "Cross immunity (Q25)","Misdiagnosis (Q26)","Interventions (Q27)","Interrupted services (Q28)","Healthcare seeking (Q29)","External factors (Q30)"))
+
+# Compute the correlation matrix
+correlation_matrix <- cor(as.matrix(cor_columns))
+# Melt the correlation matrix into a long format
+correlation_melted <- reshape2::melt(correlation_matrix)
+correlation_melted = as_tibble(correlation_melted)%>%
+  mutate(value = ifelse(value == 1, NA, value))
+
+# Plot the correlation matrix of these questions
+#customlabels = c("Coinfected hosts, Q", #"Contact_rates","Incubation","Infectiousness","Mortality","Infectious_period","Recovery",
+ #                                        "Within_host_aspects","Pathogen_pathogen_interaction", #"Pathogen_pathogen_directionality","Disease_course","Differing_susceptibility", #"Cross_immunity","Misdiagnosis","Interventions","Interrupted_services","Healthcare_seeking","External_facto#rs")
+complex_cor_plot <- ggplot(correlation_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick", midpoint = 0,
+                       limits = c(-1, 1), na.value = "grey", name = "Correlation Coefficient") +
+  theme_classic(base_size=14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "D.", x = " ", y = " ")
+
+#####
+#frequency of different questions together
+#freq_columns  = select(sim_index_params, c("Coinfected_hosts", "Contact_rates","Incubation","Infectiousness","Mortality","Infectious_period","Recovery",
+       #                                  "Within_host_aspects","Pathogen_pathogen_interaction", #"Pathogen_pathogen_directionality","Disease_course","Differing_susceptibility", #"Cross_immunity","Misdiagnosis","Interventions","Interrupted_services","Healthcare_seeking","External_factors"))
+
+freq_columns = select(sim_index_params, c("Coinfected hosts (Q23)","Contact rates (Q23f)","Incubation (Q23f)","Infectiousness (Q23f)","Mortality (Q23f)","Infectious period (Q23f)","Recovery (Q23f)", "Within-host aspects (Q23a)","Pathogen-pathogen interaction (Q23b)", "Pathogen-pathogen directionality (Q23c)","Disease course (Q23g)","Differing susceptibility (Q24)", "Cross immunity (Q25)","Misdiagnosis (Q26)","Interventions (Q27)","Interrupted services (Q28)","Healthcare seeking (Q29)","External factors (Q30)"))
+
+
+co_occurrence_matrix <- crossprod(as.matrix(freq_columns))
+co_occurrence_df <- as.data.frame(as.table(co_occurrence_matrix))%>%
+  mutate(distance = stringdist::stringdist(Var1, Var2))%>% #to make the same question pair on the diagonal
+  arrange(distance)%>%
+  mutate(Freq = ifelse(row_number() <= 18, NA, Freq))%>%
+  mutate(percentage = Freq/311*100)%>%
+  arrange(desc(percentage))
+
+
+# Create a heatmap using ggplot2
+co_occur_plot <- ggplot(co_occurrence_df, aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(title = "C.",
+       x = "",
+       y = " ",
+       fill = "Number of models") +
+  theme_classic(base_size = 14)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 0, vjust = 0.5, hjust = 1))
+
+complexity_figure = ggarrange(sim_index, params_index, co_occur_plot, complex_cor_plot, heights = c(0.7, 1))
+#should we add a +1 for each extra pathogen modeled? look at that
+#survey_sim_index = survey_sim_index%>%
+ # mutate(Q13 = as.numeric(Q13))%>%
+ # mutate(sim_index2 = sim_index+(Q13-1)) #did number of pathogens minus 1 since a single pathogen model has 1 pathogen, so any extra are the difference
+
+#ggplot(survey_sim_index, aes(x = sim_index2)) +
+ # geom_histogram(binwidth = 1, fill = "red", color = "black", alpha = 0.7) +
+ # labs(title = "Similarity index", x = "Q23f_count", y = "Frequency") +
+  #theme_classic()
+
+#I think I will use the base sim_index without pathogen number for now
+
+
+```
+
+```{r heatmap for taxonomic group and transmission mode}
+which_together = survey%>%
+  dplyr::select(Path1, Path2, Path3, Path4, Path5, Path6, Path7, Path8, Path9)%>%
+  mutate_all(~ ifelse(. == "n/a", NA, .))
+
+together_long <- which_together %>%
+  rowid_to_column() %>%
+  pivot_longer(cols = starts_with("Path"), names_to = "Path_num", values_to = "Path") %>%
+  filter(!(is.na(Path) | Path == ""))%>%
+  arrange(rowid)
+
+pair_counts <- together_long %>%
+  group_by(rowid) %>%
+  mutate(pair = list(combn(sort(Path), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+###
+#convert pathogen to taxonomy/transmission mode
+taxonomy = read.csv("Taxonomy Pathogen key.csv")
+#head(taxonomy)
+#head(pair_counts)
+
+tax_trans = taxonomy %>%
+  drop_na()%>%
+  unite(combined_column, taxonomy, mode, sep = ", ", remove = FALSE)
+
+#graph
+heatmap_data <- pair_counts %>%
+  left_join(tax_trans %>% select(word, combined_column), by = c("Var1" = "word")) %>%
+  left_join(tax_trans %>% select(word, combined_column), by = c("Var2" = "word")) %>%
+  mutate(TT_1 = combined_column.x, TT_2 = combined_column.y) %>%
+  select(-combined_column.x, -combined_column.y)%>%
+  na.omit%>%
+  select(-Var1, -Var2)
+
+heatmap_data_expanded <- heatmap_data[rep(seq_len(nrow(heatmap_data)), heatmap_data$count), ]
+
+heatmap_data_expanded <- heatmap_data_expanded %>%
+  mutate(pair = pmap_chr(list(TT_1, TT_2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("TT_1", "TT_2"), sep = "__", extra = "merge")
+
+heatmap_data_swapped <- heatmap_data_expanded[, c("TT_2", "TT_1", names(heatmap_data_expanded)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(heatmap_data_swapped)[1:2] <- c("TT_1", "TT_2")
+
+# Combine the original dataframe with the new swapped dataframe
+heatmap_data_combined <- rbind(heatmap_data_expanded, heatmap_data_swapped)
+
+tax_trans_heatmap = ggplot(heatmap_data_combined, aes(x = TT_2, y = TT_1, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "navy", high = "firebrick") +
+  labs(x = " ", y = " ", fill = "Frequency") +
+  ggtitle(" ") +
+  theme_minimal(base_size=16) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+##percent of time things are together
+pair_percents = heatmap_data_expanded%>%
+  mutate(percentage = total_count / sum(total_count) * 100)%>%
+  arrange(desc(percentage))
+
+sum(pair_percents$total_count)
+
+```
+
+
+
+Older code no longer in use:
+```{r NOT PREFERRED which pathogens together heat map - SETS UP FOR LOWER HEATMAP}
+which_together = survey%>%
+  dplyr::select(Path1, Path2, Path3, Path4, Path5, Path6, Path7, Path8, Path9)
+
+which_together2 <- data.frame(
+  Column1 = c(rep(which_together$Path1, 5), rep(which_together$Path2, 4), rep(which_together$Path3, 3),
+                  rep(which_together$Path4, 2), rep(which_together$Path5, 1)),
+  Column2 = c(which_together$Path2, which_together$Path3, which_together$Path4, which_together$Path5, which_together$Path6, which_together$Path3, which_together$Path4, which_together$Path5, which_together$Path6, which_together$Path4, which_together$Path5, which_together$Path6, which_together$Path5, which_together$Path6, which_together$Path6)
+)
+
+# Print the new dataset
+print(which_together2)
+which_together2 = which_together2%>%
+ arrange(desc(Column1))%>%
+  filter(!is.na(Column1) & !is.na(Column2) & Column1 != "" & Column2 != "")
+
+write.csv(which_together2, "Pathogen names.csv", row.names = FALSE)
+
+pairs <- cbind(paste(which_together2$Column1, which_together2$Column2), paste(which_together2$Column2, which_together2$Column1))
+
+# Count the occurrences of each pair
+pair_counts <- table(pairs)
+
+# Sort the pairs by frequency
+sorted_pair_counts <- sort(pair_counts, decreasing = TRUE)
+print(sorted_pair_counts)
+
+pair_counts_df <- as_tibble(sorted_pair_counts)
+
+# Rename the columns
+colnames(pair_counts_df) <- c("Pair", "Frequency")
+
+#Go into excel and just manually delete duplicates and make 2 columns
+write.csv(pair_counts_df, "Pathogen pair counts.csv", row.names = FALSE)
+
+#bring back from excel
+pair_counts = read.csv("Pathogen pair counts_clean_csv.csv")
+
+pair_counts <- pair_counts %>%
+  mutate(Column2 = str_trim(Column2, side = "left"))
+
+#word_pairs_count <- table(which_together2$Column1, which_together2$Column2)
+#word_pairs_count=as.data.frame(word_pairs_count)
+#word_pairs_count = word_pairs_count%>%
+  #filter(!(Freq == 0))
+
+# Convert the result to a data frame
+#word_pairs_count_df <- as.data.frame.matrix(word_pairs_count)
+#write.csv(word_pairs_count_df, "Pathogen pairs matrix.csv", row.names = TRUE)
+
+
+#my.breaks <-c(0,1,2,10,20,30,40,50)
+#my.col=c("white","lightblue", "lightgreen","yellow","orange","red", "firebrick4")
+
+heatmap.2(as.matrix(word_pairs_count_df),
+         col = heat.colors(10),  # Adjust the color scale as needed
+          #breaks=my.breaks,
+          trace = "none",
+          main = "Word Pairs Heatmap",
+          xlab = "Column2", ylab = "Column1")
+
+word_pairs_count_df <- word_pairs_count_df %>%
+  mutate(Var1 = reorder(Var1, -Freq),
+         Var2 = reorder(Var2, -Freq))
+
+ggplot(word_pairs_count_df, aes(Var1, Var2, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(title = "Frequency of Pathogen Pairs",
+       x = "Var1",
+       y = "Var2") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#so many zeroes it's just not helpful. maybe try by transmission mode? but then there's papers that cross transmission mode. try with >2?
+
+word_pairs_count_df = word_pairs_count_df%>%
+  arrange(desc(Freq))
+```
+
+```{r OLD NOT PREFERRED taxonomy by transmission mode heatmap}
+#word_pairs_count_df has the count of which pathogens together, merge them and create column for the combined taxonomy/mode from the "taxonomy" dataset
+
+head(taxonomy)
+head(pair_counts)
+
+tax_trans = taxonomy %>%
+  drop_na()%>%
+  unite(combined_column, taxonomy, mode, sep = ", ", remove = FALSE)
+
+heatmap_data <- pair_counts %>%
+  left_join(tax_trans %>% select(word, combined_column), by = c("Column1" = "word")) %>%
+  left_join(tax_trans %>% select(word, combined_column), by = c("Column2" = "word")) %>%
+  mutate(TT_1 = combined_column.x, TT_2 = combined_column.y) %>%
+  select(-combined_column.x, -combined_column.y)%>%
+  na.omit
+
+heatmap_data <- heatmap_data%>%
+  group_by(TT_1, TT_2) %>%
+  summarise(Freq = sum(Frequency))%>%
+  ungroup()%>%
+  arrange(desc(Freq))
+
+custom_order_TT_1 <- c("Virus, Sexually transmitted", "Virus, Other", "Virus, Sexually transmitted", "Virus, Respiratory", "Virus, Other", "Virus, Sexually transmitted", "Bacteria, Sexually transmitted", "Virus, Other", "Bacteria, Sexually transmitted", "Virus, Sexually transmitted", "Virus, Other", "Virus, Sexually transmitted", "Bacteria, Respiratory", "Virus, Other", "Virus, Vector borne", "Bacteria, Sexually transmitted", "Protozoa, Vector borne", "Virus, Other", "Protozoa, Vector borne", "Virus, Sexually transmitted", "Bacteria, Respiratory", "Virus, Respiratory", "Bacteria, Sexually transmitted", "Protozoa, Vector borne", "Protozoa, Vector borne", "Virus, Other", "Virus, Other", "Virus, Respiratory", "Virus, Sexually transmitted", "Virus, Sexually transmitted", "Virus, Vector borne", "Virus, Other", "Virus, Sexually transmitted", "Bacteria, Respiratory", "Bacteria, Respiratory", "Bacteria, Respiratory", "Protozoa, Vector borne", "Virus, Respiratory", "Virus, Vector borne", "Bacteria, Fecal-oral", "Bacteria, Fecal-oral", "Bacteria, Fecal-oral", "Bacteria, Fecal-oral", "Bacteria, Other", "Bacteria, Other", "Bacteria, Sexually transmitted", "Bacteria, Sexually transmitted", "Bacteria, Water borne", "Bacteria, Water borne", "Bacteria, Water borne", "Bacteria, Water borne", "Helminth, Vector borne", "Helminth, Vector borne", "Helminth, Vector borne", "Protozoa, Fecal-oral", "Protozoa, Fecal-oral", "Protozoa, Vector borne", "Protozoa, Vector borne", "Protozoa, Vector borne", "Protozoa, Vector borne", "Protozoa, Vector borne", "Protozoa, Water borne", "Protozoa, Water borne", "Virus, Fecal-oral", "Virus, Fecal-oral", "Virus, Fecal-oral", "Virus, Other", "Virus, Respiratory", "Virus, Respiratory", "Virus, Respiratory", "Virus, Respiratory", "Virus, Sexually transmitted", "Virus, Sexually transmitted", "Virus, Vector borne")
+custom_order_TT_2 <- c("Bacteria, Respiratory", "Bacteria, Respiratory", "Virus, Sexually transmitted", "Virus, Respiratory", "Virus, Sexually transmitted", "Virus, Other", "Bacteria, Sexually transmitted", "Virus, Other", "Virus, Sexually transmitted", "Protozoa, Vector borne", "Protozoa, Vector borne", "Bacteria, Sexually transmitted", "Virus, Respiratory", "Bacteria, Sexually transmitted", "Virus, Vector borne", "Virus, Other", "Helminth, Vector borne", "Virus, Respiratory", "Protozoa, Vector borne", "Virus, Respiratory", "Virus, Other", "Virus, Other", "Protozoa, Sexually transmitted", "Bacteria, Fecal-oral", "Bacteria, Water borne", "Bacteria, Fecal-oral", "Bacteria, Water borne", "Bacteria, Respiratory", "Bacteria, Fecal-oral", "Bacteria, Water borne", "Virus, Respiratory", "Helminth, Vector borne", "Helminth, Vector borne", "Bacteria, Respiratory", "Protozoa, Vector borne", "Virus, Sexually transmitted", "Helminth, Other", "Virus, Vector borne", "Protozoa, Vector borne", "Bacteria, Fecal-oral", "Bacteria, Sexually transmitted", "Bacteria, Water borne", "Virus, Respiratory", "Bacteria, Fecal-oral", "Bacteria, Water borne", "Protozoa, Vector borne", "Virus, Respiratory", "Bacteria, Fecal-oral", "Bacteria, Sexually transmitted", "Bacteria, Water borne", "Virus, Respiratory", "Helminth, Other", "Virus, Other", "Virus, Sexually transmitted", "Virus, Other", "Virus, Sexually transmitted", "Bacteria, Sexually transmitted", "Virus, Fecal-oral", "Virus, Other", "Virus, Respiratory", "Virus, Vector borne", "Virus, Other", "Virus, Sexually transmitted", "Protozoa, Vector borne", "Virus, Other", "Virus, Sexually transmitted", "Helminth, Other", "Bacteria, Fecal-oral", "Bacteria, Water borne", "Virus, Fecal-oral", "Virus, Sexually transmitted", "Helminth, Other", "Protozoa, Sexually transmitted", "Bacteria, Water borne")
+
+custom_order_TT_1 <- unique(custom_order_TT_1)
+custom_order_TT_2 <- unique(custom_order_TT_2)
+# Apply custom order to the factors
+heatmap_data$TT_1 <- factor(heatmap_data$TT_1, levels = custom_order_TT_1)
+heatmap_data$TT_2 <- factor(heatmap_data$TT_2, levels = custom_order_TT_2)
+
+# Create the clustered heatmap with custom order
+tax_trans_heatmap <- ggplot(heatmap_data, aes(x = TT_2, y = TT_1, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "navy", high = "firebrick") +
+  labs(x = " ", y = " ", fill = "Frequency") +
+  ggtitle("Frequency of taxonomic groups and transmission modes modeled together") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```

@@ -1,0 +1,421 @@
+---
+title: "Co circ bibliometric data"
+author: "Kelsey Shaw"
+date: "2024-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "~/Desktop/Notre Dame/2023 Lit review- Co-circulation pathogens/Data")
+```
+
+```{r load libraries}
+library(tidyverse)
+library(fuzzyjoin)
+library(stringdist) #to match word strings for data cleaning
+library(glmmTMB)
+```
+###NEXT STEPS
+- get biblio for only yes's (or show for both included and excluded maybe thats interesting)
+- merge with whole survey data
+
+```{r get and clean data}
+biblio = read.csv("Bibliometrics final.csv")
+#head(biblio)
+biblio = biblio%>%
+  filter(Finished != "") #get rid of weird empty rows
+  
+biblio$Q1 <- iconv(biblio$Q1, to = "UTF-8", sub = "byte")
+biblio$Q1 = tolower(biblio$Q1)
+
+author_list = c("Consensus", "Alan", "Kelsey", "Neda", "Carol", "Saikanth", "Jenni", "Carly", "Guido", "Marya", "Sean", "Stacy", "Manar", "x", "write your name")
+
+k=stringsimmatrix(biblio$Q1, author_list, method="jw")
+
+dim(k)
+##we are applying the which.max function across the rows of the matrix
+#by using MARGIN=1 to find the best match of the corrected name
+#we then apply this which.max function for each row 
+#and created a new column with the corrected name
+biblio[,"Author"]=author_list[apply(X=k, MARGIN=1, FUN=which.max)]
+
+subs=survey_raw%>%
+  select(Q1, Author)
+subs #visual check; some mistakes but none with "Consensus" so I'm ok with it
+
+biblio = biblio%>%
+  select(-1:-18)%>% #ip addresses and time done and stuff we don't need
+  filter(Author =="Consensus")%>%
+  filter(Q12 == "Yes (write any notes below)")%>% 
+  mutate(Q3 = gsub("2016`", "2016", Q3)) #fixing a typo in year
+
+##ok now try to deal with the zillion spellings of pathogens and diseases
+#PATHOGENS
+#Q14, Q18,Q21a, Q21e, Q162, Q166
+selected_columns = c("Q14", "Q18", "Q21a", "Q21e", "Q162", "Q166", "Q170", "Q174", "Q178")
+biblio = biblio%>%
+  #select(Q4,Q14, Q18, Q21a, Q21e, Q162, Q166)%>%
+#visual check to see if there are any unusual entries that I need to check make inclusion criteria; any suspicious ones saved in file "Pathogen manual check". Will need to be re-done #manually each time we get more data
+  mutate(across(all_of(selected_columns), ~ifelse(grepl("tuber|Tuberculosis|TB", .), "Mycobacterium tuberculosis", 
+                                                 ifelse(grepl("immuno|HIV|Human Immunodeficiency Virus|ImmunoDeficiency|cy virus (HIV)|hiv|AIDS|Immunodeficency|Immunodeficiency", .), "HIV", 
+                                                ifelse(grepl("asmod|alaria|P. falcip", .), "Plasmodium spp",
+                                                ifelse(grepl("papil|hpv", .), "HPV",
+                                                ifelse(grepl("easl", .), "Measles",
+                                                ifelse(grepl("ov2|COVID|SARSCoV- 2|ARS-CO|Sars-CoV-2|SARS-CoV-2|SARS-CoV-2|Sars-Cov-2", .), "Sars-Cov-2",
+                                                ifelse(grepl("holer", .), "Vibrio Cholerae",
+                                                ifelse(grepl("eponema pallidu|phyl|syphilis|Syphilis", .), "Treponema pallidum",
+                                                       ##trep pallidum is syphillis
+                                                ifelse(grepl("ulcers", .), "Mycobacterium ulcerans",
+                                                ifelse(grepl("ika|ZIKV", .), "Zika Virus",
+                                                ifelse(grepl("DENV|eng", .), "Dengue Virus",
+                                                ifelse(grepl("titisB|titis B|HBV|titis b", .), "Hepatitis B Virus",
+                                                ifelse(grepl("titisD|titis D|HDV|delta", .), "Hepatitis D Virus",
+                                                ifelse(grepl("titisC|titis C|HCV|titis c", .), "Hepatitis C Virus",
+                                                ifelse(grepl("chisto|mansoni|SCHISTO", .), "Schistosoma spp",
+                                                ifelse(grepl("RSV|synci|syncytial virus|Sync", .), "RSV",
+                                                ifelse(grepl("uenza, Neis|meningitis causing|eningitis", .), "Meningitis (unspecified)", #from this paper
+                                                ifelse(grepl("flu", .), "Influenza",
+                                                ifelse(grepl("erpes|HSV-2", .), "HSV-2",
+                                                ifelse(grepl("kungu|CHIKV", .), "Chikungunya Virus",
+                                                ifelse(grepl("eish", .), "Leishmania spp",
+                                                ifelse(grepl("Pneumonia|pneumonia causing", .), "Leishmania spp",
+                                                ifelse(grepl("Wuchereria|LYMPH|lymph|ilarial", .), "Lymphatic Filariasis (unspecified)",
+                                                ifelse(grepl("gon|Gonorrhoea|Gonorrhea", .), "Neisseria gonorrhoeae",
+                                                ifelse(grepl("protozo", .), "Trypanosoma brucei",
+                                                ifelse(grepl("Hepatitus E Virus", .), "Hepatitis E Virus",    
+                                                ifelse(grepl("Typhi|phoid", .), "Salmonella typhi", 
+                                                ifelse(grepl("Unknown", .), "Kawasaki Disease (unknown etiology)", 
+                                                ifelse(grepl("hlamydia", .), "Chlamydia trachomatis", 
+                                                ifelse(grepl("hicken", .), "Varicella zoster virus", 
+                                                ifelse(grepl("hoopin|petus|pertussis", .), "Bordetella pertussis",
+                                                ifelse(grepl("parapertussis", .), "Bordetella parapertussis",
+                                                ifelse(grepl("ubell", .), "Rubella virus", 
+                                                ifelse(grepl("treptococcus pneumon", .), "	Streptococcus pneumoniae",
+                                                ifelse(grepl("ellow", .), "Yellow Fever Virus", 
+                                                ifelse(grepl("chancroid|emophilus ducreyi|Chancroid", .), "Haemophilus ducreyi", 
+                                                        .))))))))))))))))))))))))))))))))))))))%>%
+  rename(Q4 = Q4, Path1 = Q14, Path2 = Q18, Path3 = Q21a, Path4 = Q21e, Path5 = Q162, Path6 = Q166, Path7 = Q170, Path8 = Q174, Path9 =Q178)
+
+##this currently collapses all Plasmodium, all Schisto, all Leishmania
+##has a couple unspecified pneumonia and meningitis
+##also realized that sometimes people only put sexually transmitted for HIV. must correct:
+biblio <- within(biblio, {
+  if (any(grepl("HIV", Path1)) | any(grepl("HIV", Path2))) {
+    Q16 <- ifelse(grepl("HIV", Path1) & Q16 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q16)
+    Q20 <- ifelse(grepl("HIV", Path2) & Q20 != "Sexually transmitted,Other (please specify)", 
+                       "Sexually transmitted,Other (please specify)", Q20)
+  }
+})
+
+##take a look at the compressed list of pathogens as a visual check for missed problems will need to repeat manually each time
+path_unique2 = biblio %>%
+  select(-Q4)%>%
+  select(Path1, Path2, Path3, Path4, Path5, Path6, Path7, Path8, Path9)%>%
+  gather(key = "key", value = "word") %>%
+  select(word)%>%
+  count(word, sort = TRUE)
+
+```
+
+```{r citations}
+#number of publications that have been cited at least that many times? hard to wrap my mind around
+cite_plot <- ggplot(biblio, aes(x = cited)) +
+  geom_histogram(binwidth = 1, fill = "navy", color = "navy") +
+  labs(title = " ",
+       x = "Times Cited",
+       y = "Frequency") +
+  theme_classic(base_size=16)
+
+cite_plot
+
+cite_nos = biblio%>%
+  group_by(cited)%>%
+  summarise(count = n()) %>%
+  mutate(Percentage = count / nrow(biblio) * 100)%>%
+  arrange(desc(Percentage))%>%
+  filter(cited < 25) #want to know how many were cited this many times or less
+sum(cite_nos$Percentage)
+sum(cite_nos$count)
+nrow(biblio)
+
+top_10<- biblio %>%
+  top_n(10, cited)%>%
+  select(Q4, Q5, cited, journal, hindex)%>%
+  arrange(desc(cited))
+
+#citations by year
+cite_yr <- biblio %>%
+  mutate(Q3 = gsub("2016`", "2016", Q3)) %>%
+  group_by(Q3, cited) %>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  filter(grepl("^\\d+$", Q3)) #gets rid of extraneous rows that just have the questions typed out, no data
+
+cite_yr_plot <- ggplot(cite_yr, aes(x = Q3, y = count)) +
+  geom_bar(stat = "identity", fill="navy") +
+  labs(title = " ",
+       x = "Year",
+       y = "Citation Count") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r h index distribution}
+#number of publications that have been cited at least that many times? hard to wrap my mind around
+h_plot <- ggplot(biblio, aes(x = hindex)) +
+  geom_histogram(binwidth = 1, fill = "#481567FF", color = "#481567FF", alpha = 0.7) +
+  labs(title = " ",
+       x = "H Index",
+       y = "Frequency") +
+  theme_classic()
+
+h_plot
+#Nature, Science, PNAS, and Lancet are huge outliers
+```
+
+```{r i index distribution}
+#number of publications with at least 10 citations
+i_plot <- ggplot(biblio, aes(x = i10index)) +
+  geom_histogram(binwidth = 1, fill = "#1F968BFF", color = "#1F968BFF", alpha = 0.7) +
+  labs(title = " ",
+       x = "I 10 Index",
+       y = " ") +
+  theme_classic()
+
+i_plot
+#PLOS one, PNAS, Sci reports are the biggies here
+```
+
+```{r combined figure}
+#bibliometrics = ggarrange(cite_plot, cite_yr_plot, h_plot, i_plot)
+bibliometrics = ggarrange(cite_plot)
+```
+
+```{r journal types/keywords}
+journal = read.csv("journal characteristics_csv.csv")
+colnames(journal)
+
+#WoS.Categories and Research.Areas are two relevant columns
+#looks like multiple answers are semicolon separated which makes it easier
+Categories = journal%>%
+  select(WoS.Categories)%>%
+  separate(WoS.Categories, into = c("Cat1", "Cat2", "Cat3", "Cat4", "Cat5"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  select(-WoS.Categories)%>%
+  pivot_longer(cols = starts_with("Cat"), names_to = "Cat_Column", values_to = "Count") %>%
+  na.omit()%>%
+  mutate_all(~ str_replace(., "^\\s+", ""))%>% #get rid of leading spaces in some cells
+  group_by(Count)%>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / nrow(journal) * 100)%>%
+  arrange(desc(percentage))
+
+#42 categories, need to consolidate
+#maybe: 1)Math/Engineering/Computer Science; 2) Medicine/Public Health; 3) Other Life Sciences; 4) Multidisciplinary 5)Physics
+Cat_shrunk=  journal%>%
+  select(WoS.Categories)%>%
+  separate(WoS.Categories, into = c("Cat1", "Cat2", "Cat3", "Cat4", "Cat5"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  select(-WoS.Categories)%>%
+  pivot_longer(cols = starts_with("Cat"), names_to = "Cat_Column", values_to = "Count") %>%
+  na.omit()%>%
+  mutate_all(~ str_replace(., "^\\s+", ""))%>% #get rid of leading spaces in some cells
+  mutate(Meta_Category = case_when(
+  Count %in% c("Mathematical & Computational Biology", "Mathematics, Applied", "Mathematics, Interdisciplinary Applications", "Mathematics", "Statistics & Probability") ~ "Mathematics",
+  Count %in% c("Computer Science, Interdisciplinary Applications", "Computer Science, Software Engineering", "Computer Science, Information Systems", "Engineering, Electrical & Electronic", "Engineering, Chemical", "Engineering, Mechanical", "Engineering, Multidisciplinary", "Automation & Control Systems", "Mechanics") ~ "Engineering/Computer Science",
+  Count %in% c("Management", "Operations Research & Management Science") ~ "Operations and Management",
+    Count %in% c("Infectious Diseases", "Biology", "Ecology", "Microbiology", "Immunology", "Parasitology", "Tropical Medicine", "Virology", "Cell Biology", "Genetics & Heredity", "Environmental Science", "Evolutionary Biology", "Environmental Sciences", "Biophysics", "Biotechnology & Applied Microbiology", "Biochemical Research Methods") ~ "Life Sciences",
+    Count %in% c("Gastroenterology & Hepatology", "Medicine, General & Internal", "Medicine, Research & Experimental", "	
+Medicine/Public Health", "Substance Abuse", "Psychiatry", "Public, Environmental & Occupational Health") ~ "Medicine/Public Health",
+    Count %in% c("Physics, Applied", "Physics, Mathematical", "Physics, Multidisciplinary") ~ "Physics",
+    Count %in% c("Multidisciplinary Sciences", "Materials Science, Multidisciplinary") ~ "Multidisciplinary",
+    TRUE ~ Count  # Keep the original value if it doesn't match any of the above conditions
+  ))%>%
+  group_by(Meta_Category)%>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / nrow(journal) * 100)%>%
+  arrange(desc(percentage))
+
+nrow(journal)
+######
+##Research.Areas
+Areas = journal%>%
+  select(Research.Areas)%>%
+  separate(Research.Areas, into = c("Area1", "Area2", "Area3", "Area4"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  select(-Research.Areas)%>%
+  pivot_longer(cols = starts_with("Area"), names_to = "Area_Column", values_to = "Count") %>%
+  na.omit()%>%
+  mutate_all(~ str_replace(., "^\\s+", ""))%>% #get rid of leading spaces in some cells
+  group_by(Count)%>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / nrow(journal) * 100)%>%
+  arrange(desc(percentage))
+
+
+#now make similar categories to the other one
+Areas_shrunk = journal%>%
+  select(Research.Areas)%>%
+  separate(Research.Areas, into = c("Area1", "Area2", "Area3", "Area4"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  select(-Research.Areas)%>%
+  pivot_longer(cols = starts_with("Area"), names_to = "Area_Column", values_to = "Count") %>%
+  na.omit()%>%
+  mutate_all(~ str_replace(., "^\\s+", ""))%>% #get rid of leading spaces in some cells
+  mutate(Meta_Area = case_when(
+  Count %in% c("Mathematical & Computational Biology", "Mathematics, Applied", "Mathematics, Interdisciplinary Applications", "Mathematics", "Computer Science, Interdisciplinary Applications", "Computer Science, Software Engineering", "Computer Science, Information Systems", "Engineering, Electrical & Electronic", "Engineering, Chemical", "Engineering, Mechanical", "Engineering, Multidisciplinary", "Statistics & Probability", "Engineering", "Computer Science") ~ "Math/Engineering/Computer Science",
+    Count %in% c("Infectious Diseases", "Biology", "Ecology", "Microbiology", "Immunology", "Parasitology", "Tropical Medicine", "Virology", "Cell Biology", "Genetics & Heredity", "Environmental Science", "Evolutionary Biology", "Environmental Sciences", "Biophysics", "Biotechnology & Applied Microbiology", "Biochemical Research Methods", "Environmental Sciences & Ecology", "Biochemistry & Molecular Biology", "Life Sciences & Biomedicine - Other Topics") ~ "Other Life Sciences",
+    Count %in% c("Gastroenterology & Hepatology", "Medicine, General & Internal", "Medicine, Research & Experimental", "	
+Medicine/Public Health", "Substance Abuse", "Psychiatry", "Public, Environmental & Occupational Health", "Research & Experimental Medicine", "General & Internal Medicine") ~ "Medicine/Public Health",
+    Count %in% c("Physics, Applied", "Physics, Mathematical", "Physics, Multidisciplinary") ~ "Physics",
+    Count %in% c("Multidisciplinary Sciences", "Materials Science, Multidisciplinary") ~ "Multidisciplinary",
+    TRUE ~ Count  # Keep the original value if it doesn't match any of the above conditions
+  ))%>%
+  group_by(Meta_Area)%>%
+  summarise(count = n()) %>%
+  ungroup()%>%
+  mutate(percentage = count / nrow(journal) * 100)%>%
+  arrange(desc(percentage))
+
+
+###CATEGORIES wins
+```
+
+```{r regression for covarites in citations}
+#interested in year, journal category, hindex of journal, iindex
+#start with year and indices, will add journal category later
+biblio$Q3 <- as.numeric(biblio$Q3)
+
+#look at year
+cite_yr = glmmTMB(cited~Q3, data = subset(biblio), family = nbinom2)
+summary(cite_yr)
+
+#all things
+all_model <- glmmTMB(cited ~ Q3 + hindex + i10index, data = biblio, family = nbinom2)
+summary(all_model)
+
+
+###Now web of science categories
+biblio2 = journal%>%
+  select(Author.Keywords, Keywords.Plus, DOI, WoS.Categories, Research.Areas)%>%
+  rename(Q5 = DOI)
+
+#now remember this will have a lot fewer entries then just the citations and h index one because web of science gave limited results
+biblio_merged = left_join(biblio, biblio2, by = "Q5")
+
+#separate out the WoS categories
+biblio_merged = biblio_merged%>%
+  separate(WoS.Categories, into = c("Cat1", "Cat2", "Cat3", "Cat4", "Cat5"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  mutate_all(~ str_replace(., "^\\s+", "")) #get rid of leading spaces in some cells
+
+biblio_long <- biblio_merged%>%
+  pivot_longer(cols = starts_with("cat"), names_to = "category_num", values_to = "category") %>%
+  filter(!is.na(category))%>%  # Remove rows with NA categories
+  mutate(Meta_Category = case_when(
+  category %in% c("Mathematical & Computational Biology", "Mathematics, Applied", "Mathematics, Interdisciplinary Applications", "Mathematics", "Statistics & Probability") ~ "Mathematics",
+  category %in% c("Computer Science, Interdisciplinary Applications", "Computer Science, Software Engineering", "Computer Science, Information Systems", "Engineering, Electrical & Electronic", "Engineering, Chemical", "Engineering, Mechanical", "Engineering, Multidisciplinary", "Automation & Control Systems", "Mechanics") ~ "Engineering/Computer Science",
+  category %in% c("Management", "Operations Research & Management Science") ~ "Operations and Management",
+    category %in% c("Infectious Diseases", "Biology", "Ecology", "Microbiology", "Immunology", "Parasitology", "Tropical Medicine", "Virology", "Cell Biology", "Genetics & Heredity", "Environmental Science", "Evolutionary Biology", "Environmental Sciences", "Biophysics", "Biotechnology & Applied Microbiology", "Biochemical Research Methods") ~ "Life Sciences",
+    category %in% c("Gastroenterology & Hepatology", "Medicine, General & Internal", "Medicine, Research & Experimental", "	
+Medicine/Public Health", "Substance Abuse", "Psychiatry", "Public, Environmental & Occupational Health") ~ "Medicine/Public Health",
+    category %in% c("Physics, Applied", "Physics, Mathematical", "Physics, Multidisciplinary") ~ "Physics",
+    category %in% c("Multidisciplinary Sciences", "Materials Science, Multidisciplinary") ~ "Multidisciplinary",
+    TRUE ~ category  # Keep the original value if it doesn't match any of the above conditions
+  ))%>%
+  mutate(Meta_Category = as.factor(Meta_Category))%>%
+  mutate(cited = as.numeric(cited))
+
+
+#class(biblio_long$Meta_Category)
+#str(biblio_long$cited)
+category_model <- glmmTMB(cited~Meta_Category, data = biblio_long, family = nbinom2) #include year
+summary(category_model)
+```
+
+```{r supplemental of category overlap}
+Cat_clean=  journal%>%
+  select(WoS.Categories)%>%
+  separate(WoS.Categories, into = c("Cat1", "Cat2", "Cat3", "Cat4", "Cat5"), sep = ";", remove = FALSE, convert = TRUE)%>%
+  select(-WoS.Categories)%>%
+  rowid_to_column()%>%
+  pivot_longer(cols = starts_with("Cat"), names_to = "Cat_Column", values_to = "Count") %>%
+  na.omit()%>%
+  mutate_all(~ str_replace(., "^\\s+", ""))%>% #get rid of leading spaces in some cells
+  mutate(Meta_Category = case_when(
+  Count %in% c("Mathematical & Computational Biology", "Mathematics, Applied", "Mathematics, Interdisciplinary Applications", "Mathematics", "Statistics & Probability") ~ "Mathematics",
+  Count %in% c("Computer Science, Interdisciplinary Applications", "Computer Science, Software Engineering", "Computer Science, Information Systems", "Engineering, Electrical & Electronic", "Engineering, Chemical", "Engineering, Mechanical", "Engineering, Multidisciplinary", "Automation & Control Systems", "Mechanics") ~ "Engineering/Computer Science",
+  Count %in% c("Management", "Operations Research & Management Science") ~ "Operations and Management",
+    Count %in% c("Infectious Diseases", "Biology", "Ecology", "Microbiology", "Immunology", "Parasitology", "Tropical Medicine", "Virology", "Cell Biology", "Genetics & Heredity", "Environmental Science", "Evolutionary Biology", "Environmental Sciences", "Biophysics", "Biotechnology & Applied Microbiology", "Biochemical Research Methods") ~ "Life Sciences",
+    Count %in% c("Gastroenterology & Hepatology", "Medicine, General & Internal", "Medicine, Research & Experimental", "	
+Medicine/Public Health", "Substance Abuse", "Psychiatry", "Public, Environmental & Occupational Health") ~ "Medicine/Public Health",
+    Count %in% c("Physics, Applied", "Physics, Mathematical", "Physics, Multidisciplinary") ~ "Physics",
+    Count %in% c("Multidisciplinary Sciences", "Materials Science, Multidisciplinary") ~ "Multidisciplinary",
+    TRUE ~ Count  # Keep the original value if it doesn't match any of the above conditions
+  ))%>%
+  select(-Count)
+
+cat_counts = Cat_clean%>%
+group_by(rowid)%>%
+  filter(n() > 1) %>%
+  mutate(pair = list(combn(sort(Meta_Category), 2, paste, collapse = "__"))) %>%
+  ungroup() %>%
+  select(rowid, pair) %>%
+  unnest(pair) %>%
+  group_by(pair)%>%
+  distinct(rowid, pair)%>%
+  summarize(count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")%>%
+  filter(!is.na(Var1) & Var1 != "", !is.na(Var2) & Var2 != "")
+
+heatmap_cat <- cat_counts[rep(seq_len(nrow(cat_counts)), cat_counts$count), ]
+
+heatmap_cat <- heatmap_cat %>%
+  mutate(pair = pmap_chr(list(Var1, Var2), ~ paste(sort(c(...)), collapse = "__"))) %>%
+  group_by(pair) %>%
+  summarize(total_count = n())%>%
+  separate(pair, into = c("Var1", "Var2"), sep = "__", extra = "merge")
+
+swapped_cat <- heatmap_cat[, c("Var1", "Var2", names(heatmap_cat)[-(1:2)])]
+
+# Rename the columns to match the original dataframe
+colnames(swapped_cat)[1:2] <- c("Var1", "Var2")
+
+# Combine the original dataframe with the new swapped dataframe
+cat_combined <- rbind(heatmap_cat, swapped_cat)
+
+cat_heatmap = ggplot(cat_combined, aes(x = Var1, y = Var2, fill = total_count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "#F5FBFF", high = "navy", na.value = "grey") +
+  labs(x = " ", y = " ", fill = "Frequency") +
+  ggtitle(" ") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r motivations and citations - DECIDED NOT TO DO}
+#motivations dataet from "Co circ data cleaning.RMD" in the q39 chunk
+biblio = biblio%>%
+  rename(DOI = Q5)
+mot_cite = left_join(biblio, motivations, by= "DOI")
+
+cat_strings = c("How does one pathogen impact another's dynamics", "Effect of intervention in one pathogen on all pathogens in the model", "Cost-effectiveness of different intervention strategies/optimal control", "Developing mathematical models for specific pairs of pathogens")
+
+mot_cite <- mot_cite %>%
+  separate_rows(Category, sep = "; ") %>%
+  mutate_all(~ ifelse(. == "", NA, .))%>%
+  na.omit()%>%
+  mutate(
+    original_value = Category,  # Create a new column to store the original value
+    Category = case_when(Category %in% cat_strings ~ Category,  # Keep the original value if it's in the specific list
+       TRUE ~ "Other"  # Otherwise, replace with "Other"
+       ))
+
+cite_mot <- ggplot(mot_cite, aes(x = cited, fill = "Category") ) +
+  geom_histogram(binwidth = 1, alpha = 0.7) +
+  labs(title = " ",
+       x = "Times Cited",
+       y = "Frequency") +
+  theme_classic()
+```
